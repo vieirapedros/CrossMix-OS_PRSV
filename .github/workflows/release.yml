@@ -1,0 +1,47 @@
+name: CrossMix Smart Pro Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release package
+        run: |
+          chmod +x _assets/scripts/package-release.sh
+          ./_assets/scripts/package-release.sh \
+            . \
+            "${{ steps.version.outputs.version }}" \
+            release
+
+      - name: Verify checksum
+        run: |
+          PACKAGE="release/crossmix-smart-pro-${{ steps.version.outputs.version }}.tar.gz"
+          sha256sum -c "${PACKAGE}.sha256"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CrossMix Smart Pro ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            release/crossmix-smart-pro-${{ steps.version.outputs.version }}.tar.gz
+            release/crossmix-smart-pro-${{ steps.version.outputs.version }}.tar.gz.sha256
