@@ -1,0 +1,6 @@
+{
+    "label": "Test App",
+    "icon": "icon.png",
+    "launch": "launch.sh",
+    "description": "Launch test"
+}

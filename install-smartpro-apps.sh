@@ -12,6 +12,7 @@ APPS=(
   WiFiTools
   BatteryGuard
   ThemeSwitcher
+  TestApp
 )
 
 if [ -z "$TARGET" ]; then
@@ -36,7 +37,7 @@ fi
 mkdir -p "$TARGET/Data/romm/cache/covers" "$TARGET/Data/romm/cache/metadata" \
   "$TARGET/Data/gamecenter" "$TARGET/Data/portmanager" \
   "$TARGET/Data/biosdoctor" "$TARGET/Data/batteryguard" \
-  "$TARGET/Data/theme-switcher"
+  "$TARGET/Data/theme-switcher" "$TARGET/Data/testapp"
 
 if [ ! -f "$TARGET/Data/romm/config.json" ]; then
   cat > "$TARGET/Data/romm/config.json" <<'EOF'
