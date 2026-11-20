@@ -9,9 +9,11 @@ mount > /mnt/SDCARD/Logs/mount.txt 2>&1
   done
 ) &
 
-# Test TestApp launch.sh directly (once, 20s after boot)
-(
-  sleep 20
-  /mnt/SDCARD/Apps/TestApp/launch.sh > /mnt/SDCARD/Logs/launch_test.log 2>&1
-  echo "exit_code=$?" >> /mnt/SDCARD/Logs/launch_test.log
-) &
+# Test TestApp launch.sh immediately
+{
+  echo "=== TestApp folder ==="
+  ls -la /mnt/SDCARD/Apps/TestApp/ 2>&1
+  echo "=== Running launch.sh ==="
+  /mnt/SDCARD/Apps/TestApp/launch.sh
+  echo "exit_code=$?"
+} > /mnt/SDCARD/Logs/launch_test.log 2>&1
