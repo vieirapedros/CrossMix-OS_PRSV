@@ -1,0 +1,25 @@
+name: Sync with JukaMix
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check JukaMix for updates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM_HEAD=$(curl -s https://api.github.com/repos/jukaLang/JukaCrossMix-OS/commits/main | jq -r '.sha')
+          LOCAL_HEAD=$(curl -s https://api.github.com/repos/vieirapedros/CrossMix-OS_PRSV/commits/main | jq -r '.sha')
+          if [ "$UPSTREAM_HEAD" != "$LOCAL_HEAD" ]; then
+            gh issue create \
+              -R vieirapedros/CrossMix-OS_PRSV \
+              -t "JukaMix has new commits - sync needed" \
+              -b "JukaMix main is at $UPSTREAM_HEAD, local main is at $LOCAL_HEAD.\n\nCompare: https://github.com/jukaLang/JukaCrossMix-OS/compare/$LOCAL_HEAD...$UPSTREAM_HEAD"
+          else
+            echo "JukaMix and local main are in sync."
+          fi
