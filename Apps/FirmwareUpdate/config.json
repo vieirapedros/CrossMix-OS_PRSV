@@ -1,0 +1,6 @@
+{
+  "label": "Firmware Update",
+  "icon": "/mnt/SDCARD/Apps/OTA-update/icon.png",
+  "launch": "launch.sh",
+  "description": "Check and update TrimUI firmware"
+}
