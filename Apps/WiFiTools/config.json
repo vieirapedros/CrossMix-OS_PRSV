@@ -1,0 +1,7 @@
+{
+"label":"Wi-Fi Tools",
+"icon":"icon.png",
+"iconsel":"icon.png",
+"launch":"launch.sh",
+"description":"Network diagnostics"
+}

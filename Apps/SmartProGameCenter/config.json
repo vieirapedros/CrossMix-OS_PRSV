@@ -1,0 +1,7 @@
+{
+"label":"Game Center",
+"icon":"icon.png",
+"iconsel":"icon.png",
+"launch":"launch.sh",
+"description":"Favorites, recents and playtime"
+}

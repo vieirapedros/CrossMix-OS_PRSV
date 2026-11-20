@@ -1,6 +1,7 @@
 {
-  "url": "http://100.100.100.100:3000",
-  "token": "",
-  "download_dir": "/mnt/SDCARD/Roms",
-  "cache_dir": "/mnt/SDCARD/Data/romm/cache"
+"label":"RomM Library",
+"icon":"icon.png",
+"iconsel":"icon.png",
+"launch":"launch.sh",
+"description":"RomM library and downloads"
 }

@@ -1,0 +1,7 @@
+{
+"label":"BIOS Doctor",
+"icon":"icon.png",
+"iconsel":"icon.png",
+"launch":"launch.sh",
+"description":"Check BIOS files"
+}

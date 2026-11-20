@@ -26,6 +26,11 @@ fi
 mkdir -p "$TARGET/Apps/RomMLibrary/lib" "$TARGET/Data/romm/cache/covers" "$TARGET/Data/romm/cache/metadata"
 
 cp -a "$REPO_ROOT/Apps/RomMLibrary/." "$TARGET/Apps/RomMLibrary/"
+
+if [ ! -f "$TARGET/Apps/RomMLibrary/icon.png" ] && [ -f "$TARGET/Apps/Reboot/icon.png" ]; then
+  cp "$TARGET/Apps/Reboot/icon.png" "$TARGET/Apps/RomMLibrary/icon.png"
+fi
+
 chmod +x "$TARGET/Apps/RomMLibrary/launch.sh" \
   "$TARGET/Apps/RomMLibrary/romm.sh" \
   "$TARGET/Apps/RomMLibrary/lib/api.sh" \

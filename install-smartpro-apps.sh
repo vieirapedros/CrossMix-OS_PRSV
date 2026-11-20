@@ -47,6 +47,10 @@ for app in "${APPS[@]}"; do
   mkdir -p "$TARGET/Apps/$app"
   cp -a "$REPO_ROOT/Apps/$app/." "$TARGET/Apps/$app/"
 
+  if [ ! -f "$TARGET/Apps/$app/icon.png" ] && [ -f "$TARGET/Apps/Reboot/icon.png" ]; then
+    cp "$TARGET/Apps/Reboot/icon.png" "$TARGET/Apps/$app/icon.png"
+  fi
+
   find "$TARGET/Apps/$app" -type f -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
   echo "Instalado: $app"
 done
