@@ -1,7 +1,6 @@
 #!/bin/sh
 
-echo performance >/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-echo 1416000 >/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
+/mnt/SDCARD/System/usr/trimui/scripts/cpu_boost.sh
 
 PATH="/mnt/SDCARD/System/bin:$PATH"
 export LD_LIBRARY_PATH="/mnt/SDCARD/System/lib:/usr/trimui/lib:$LD_LIBRARY_PATH"
@@ -68,7 +67,7 @@ if [ "$current_crc_Emus" != "$previous_crc_Emus" ] || [ "$current_crc_DB" != "$p
         config_json_path="${dir}config.json"
         subdir=$(basename "$dir")
 
-        if [[ "$subdir" == _* ]]; then
+        if [ "${subdir#_}" != "$subdir" ]; then
             continue
         fi
 

@@ -1,8 +1,7 @@
 #!/bin/sh
 
 # Set CPU performance mode
-echo performance >/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-echo 1416000 >/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
+/mnt/SDCARD/System/usr/trimui/scripts/cpu_boost.sh
 
 PATH="/mnt/SDCARD/System/bin:$PATH"
 export LD_LIBRARY_PATH="/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH"
@@ -122,11 +121,9 @@ find "/mnt/SDCARD/Roms/PS" -type f \( -iname "*.m3u" -o -iname "*.cue" -o -iname
   romNameNoExtension=${romName%.*}
   echo "romNameNoExtension: $romNameNoExtension"
 
-  romNameTrimmed="${romNameNoExtension/".nkit"/}"
-  romNameTrimmed="${romNameTrimmed//"!"/}"
-  romNameTrimmed="${romNameTrimmed//"&"/}"
-  romNameTrimmed="${romNameTrimmed/"Disc "/}"
-  romNameTrimmed="${romNameTrimmed/"Rev "/}"
+  romNameTrimmed=$(printf '%s' "$romNameNoExtension" | sed 's/\.nkit//')
+  romNameTrimmed=$(printf '%s' "$romNameTrimmed" | tr -d '!&')
+  romNameTrimmed=$(printf '%s' "$romNameTrimmed" | sed -e 's/Disc //' -e 's/Rev //')
   romNameTrimmed="$(echo "$romNameTrimmed" | sed -e 's/ ([^()]*)//g' -e 's/ [[A-z0-9!+]*]//g' -e 's/([^()]*)//g' -e 's/[[A-z0-9!+]*]//g')"
   
   # Check if the Name is in the database

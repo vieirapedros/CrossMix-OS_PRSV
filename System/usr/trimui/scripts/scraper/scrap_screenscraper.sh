@@ -1,7 +1,7 @@
 #!/bin/sh
 #echo $0 $*    # for debugging
 
-source /mnt/SDCARD/System/usr/trimui/scripts/common_functions.sh
+. /mnt/SDCARD/System/usr/trimui/scripts/common_functions.sh
 
 enable_wifi
 check_connection
@@ -47,7 +47,7 @@ Quota counters are reset every day at midnight (French time - UTC+2)
 
 EOF
 
-    # read -n 1 -s -r -p "Press A to continue"
+    # printf '%s' "Press A to continue"; read -r _
     # clear
 }
 
@@ -69,7 +69,7 @@ search_on_screenscraper() {
                 # read dummy
                 break
             else
-                let retry_count++
+                retry_count=$((retry_count + 1))
                 echo "Retrying API call ($retry_count / $max_retries)..."
                 echo "Registering a Screenscraper account can help !"
                 sleep_duration=$((5 + retry_count))
@@ -83,8 +83,8 @@ search_on_screenscraper() {
     # Don't check art if screenscraper is closed
     if echo "$Head_api_result" | grep -q "API closed"; then
         echo -e "${RED}The Screenscraper API is currently down, please try again later.{NONE}"
-        let Scrap_Fail++
-        # read -n 1 -s -r -p "Press A to exit"
+        Scrap_Fail=$((Scrap_Fail + 1))
+        # printf '%s' "Press A to exit"; read -r _
         return
     fi
 
@@ -92,7 +92,7 @@ search_on_screenscraper() {
     if [ -z "$Head_api_result" ]; then
         echo -e "${RED}Request failed${NC}"
         echo "$(date '+%Y-%m-%d %Hh%M') : Request failed for ${romNameTrimmed}"
-        let Scrap_Fail++
+        Scrap_Fail=$((Scrap_Fail + 1))
         return
     fi
 
@@ -351,6 +351,14 @@ IFS='
 set -f
 # =================
 
+# Validate CurrentSystem to prevent command injection
+case "$CurrentSystem" in
+    *[!a-zA-Z0-9_.-]*)
+        echo "Error: Invalid system name: $CurrentSystem"
+        exit 1
+        ;;
+esac
+
 for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
 	! -name '.*' ! -name '*.xml' ! -name '*.miyoocmd' ! -name '*.cfg' ! -name '*.db' \
     ! -name '*.png' ! -name '*.state' ! -name '*.srm' \
@@ -365,14 +373,14 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
     echo "-------------------------------------------------------------------------"
     gameIDSS=""
     url=""
-    let romcount++
+    romcount=$((romcount + 1))
 
     # Cleaning up names
     romName=$(basename "$file")
     romNameNoExtension=${romName%.*}
     echo $romNameNoExtension
 
-    romNameTrimmed="${romNameNoExtension/".nkit"/}"
+    romNameTrimmed=$(printf '%s' "$romNameNoExtension" | sed 's/\.nkit//')
     romNameTrimmed="$(echo "$romNameTrimmed" | sed -E \
        	-e 's/(!|&|Disc|Rev|CD[0-9])//g' \
         -e 's| *[[(].*||' \
@@ -383,7 +391,7 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
 
     if [ -f "/mnt/SDCARD/Imgs/$CurrentSystem/$romNameNoExtension.png" ]; then
         echo -e "${YELLOW}already Scraped !${NC}"
-        let Scrap_notrequired++
+        Scrap_notrequired=$((Scrap_notrequired + 1))
 
     else
         rom_size=$(stat -c%s "$file")
@@ -400,7 +408,7 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
 
             if [ "$rom_size" -gt "$MAX_FILE_SIZE_BYTES" ]; then
                 echo -e "${RED}Rom is too big to make a checksum.${NC}"
-                let Scrap_Fail++
+                Scrap_Fail=$((Scrap_Fail + 1))
                 continue
 
             else
@@ -413,7 +421,7 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
                 search_on_screenscraper
                 if ! [ "$gameIDSS" -eq "$gameIDSS" ] 2>/dev/null; then
                     echo -e "${RED}Failed to get game ID${NC}"
-                    let Scrap_Fail++
+                    Scrap_Fail=$((Scrap_Fail + 1))
                     continue
                 fi
 
@@ -460,7 +468,7 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
 
         if [ -z "$MediaURL" ] || [ "$MediaURL" = "null" ]; then
             echo -e "${YELLOW}Game matches but no media found!${NC}"
-            let Scrap_Fail++
+            Scrap_Fail=$((Scrap_Fail + 1))
             continue
         fi
 
@@ -475,14 +483,28 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
         output_file="$output_dir/$romNameNoExtension.png"
         temp_file="/tmp/${romNameNoExtension}.tmpdl"
         
-        MediaURL=${MediaURL//\"/}
+        MediaURL=$(printf '%s' "$MediaURL" | tr -d '"')
         
         wget "$MediaURL" -O "$temp_file"   >/dev/null 2>&1
         if [ $? -eq 0 ]; then
             mv "$temp_file" "$output_file"
             echo "Download successful: $output_file"
         if [ -d /tmp/trimui_osd/ ]; then
-            echo -e "{ \"duration\":2000, \"x\":920, \"y\":330, \"message\":\" \", \"font\":\"\", \"icon\":\"$output_file\", \"fontsize\":24 }" > /tmp/trimui_osd/osd_toast_msg
+            read -r current_device </etc/trimui_device.txt
+            case "$current_device" in
+            tsp | tsps)
+                echo -e "{ \"duration\":2000, \"x\":920, \"y\":330, \"message\":\" \", \"font\":\"\", \"icon\":\"$output_file\", \"fontsize\":24 }" > /tmp/trimui_osd/osd_toast_msg
+                ;;
+            brick | brickpro)
+                echo -e "{ \"duration\":2000, \"x\":350, \"y\":350, \"message\":\" \", \"font\":\"\", \"icon\":\"$output_file\", \"fontsize\":24 }" > /tmp/trimui_osd/osd_toast_msg
+                ;;
+            *)
+                ;;
+        esac
+
+            
+            
+            
         fi
         else
             echo "Download failed. Cleaning up."
@@ -493,10 +515,10 @@ for file in $(eval "find /mnt/SDCARD/Roms/$CurrentSystem -maxdepth 2 -type f \
 
         if [ -f "/mnt/SDCARD/Imgs/$CurrentSystem/$romNameNoExtension.png" ]; then
             echo -e "${GREEN}Scraped!${NC}"
-            let Scrap_Success++
+            Scrap_Success=$((Scrap_Success + 1))
         else
             echo -e "${RED}Download failed.${NC}"
-            let Scrap_Fail++
+            Scrap_Fail=$((Scrap_Fail + 1))
         fi
 
      

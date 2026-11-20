@@ -20,7 +20,14 @@ fi
 timestamp=$(date +'%Y%m%d-%Hh%M')
 
 LOG_FILE="/mnt/SDCARD/System/updates/portmaster_fix_$timestamp.log"
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Mirror all output to the log file while keeping it visible (POSIX sh)
+_LOG_PIPE="/tmp/$$.tee.pipe"
+rm -f "$_LOG_PIPE"
+mkfifo "$_LOG_PIPE"
+tee -a "$LOG_FILE" <"$_LOG_PIPE" &
+_TEE_PID=$!
+exec >"$_LOG_PIPE" 2>&1
+trap 'rm -f "$_LOG_PIPE"; kill "$_TEE_PID" 2>/dev/null' 0 1 2 3 15
 
 echo -e "\n==== PortMaster Fix started at $timestamp ==="
 
@@ -100,7 +107,7 @@ rootfs_space=$(df / | awk 'NR==2 {print $4}')
 
 if [ "$rootfs_space" -lt "$minspace" ]; then
     # Cleaning root
-    for f in /*; do if [ -f "$f" ] && [ ! "$f" == "/device_info_TrimUI_TrimUI Smart Pro.txt" ] && [ ! "$f" == "/rdinit" ] && [ ! "$f" == "/worldmap.dat" ]; then rm $f; fi; done
+    for f in /*; do if [ -f "$f" ] && [ ! "$f" = "/device_info_TrimUI_TrimUI Smart Pro.txt" ] && [ ! "$f" = "/rdinit" ] && [ ! "$f" = "/worldmap.dat" ]; then rm $f; fi; done
     rootfs_space=$(df / | awk 'NR==2 {print $4}')
     if [ "$rootfs_space" -lt "$minspace" ]; then
         echo -ne "${RED}Error: Available space on internal storage is less than 20 MB${NONE}\n"
@@ -165,8 +172,8 @@ echo "-----------------------------------------"
 # Variables
 PM_FixArchive="/mnt/SDCARD/System/updates/portmaster_fix.7z"
 PM_FixArchive_MD5="/mnt/SDCARD/System/updates/portmaster_fix.7z.md5"
-PM_FixArchive_URL="https://raw.githubusercontent.com/cizia64/CrossMix-OS/refs/heads/main/_assets/resources/portmaster_fix.7z"
-PM_FixArchive_MD5_URL="https://raw.githubusercontent.com/cizia64/CrossMix-OS/refs/heads/main/_assets/resources/portmaster_fix.7z.md5"
+PM_FixArchive_URL="https://raw.githubusercontent.com/jukaLang/JukaCrossMix-OS/refs/heads/main/_assets/resources/portmaster_fix.7z"
+PM_FixArchive_MD5_URL="https://raw.githubusercontent.com/jukaLang/JukaCrossMix-OS/refs/heads/main/_assets/resources/portmaster_fix.7z.md5"
 TEMP_FILE="/tmp/portmaster_fix.7z.md5"
 
 # Step 1: Download the remote MD5 file
@@ -206,8 +213,8 @@ echo "------------------------------------"
 # Variables
 Python_Archive="/mnt/SDCARD/System/updates/update_001/python.zip"
 Python_Archive_MD5="/mnt/SDCARD/System/updates/update_001/python.zip.md5"
-Python_Archive_URL="https://raw.githubusercontent.com/cizia64/CrossMix-OS/refs/heads/main/_assets/resources/python.zip"
-Python_Archive_MD5_URL="https://raw.githubusercontent.com/cizia64/CrossMix-OS/refs/heads/main/_assets/resources/python.zip.md5"
+Python_Archive_URL="https://raw.githubusercontent.com/jukaLang/JukaCrossMix-OS/refs/heads/main/_assets/resources/python.zip"
+Python_Archive_MD5_URL="https://raw.githubusercontent.com/jukaLang/JukaCrossMix-OS/refs/heads/main/_assets/resources/python.zip.md5"
 TEMP_FILE="/tmp/python.zip.md5"
 
 # Step 1: Download the remote MD5 file
@@ -256,7 +263,7 @@ rm "/etc/ex_update/00X"
 
 sleep 3
 
-source /mnt/SDCARD/System/etc/ex_config
+. /mnt/SDCARD/System/etc/ex_config
 /mnt/SDCARD/System/bin/ex_update.sh
 
 ########################################### Reset & Backup PortMaster configuration files ###########################################

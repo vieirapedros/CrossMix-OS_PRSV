@@ -1,11 +1,11 @@
 #!/bin/sh
-source /mnt/SDCARD/System/usr/trimui/scripts/update_common.sh
+. /mnt/SDCARD/System/usr/trimui/scripts/update_common.sh
 
 cmd=$1
 
 # channel : stable or beta
 channel=$(cat "$updatedir/ota_channel.txt" 2>/dev/null)
-if [ "$channel" == "" ]; then
+if [ "$channel" = "" ]; then
     channel="stable"
 fi
 
@@ -15,7 +15,7 @@ main() {
     check_connection
     clear
 
-    if [ "$cmd" == "check" ]; then
+    if [ "$cmd" = "check" ]; then
         IP=$(ip route get 1 | awk '{print $NF;exit}')
         if [ "$IP" != "" ]; then
             get_release_info
@@ -31,7 +31,7 @@ main() {
     get_release_info
     if [ $? -eq 1 ]; then
         echo -ne "${YELLOW}"
-        read -n 1 -s -r -p "Press A to exit"
+        printf '%s' "Press A to exit"; read -r _
         echo "no release" >/tmp/ota_release_result
         exit
         # killall -2 SimpleTerminal
@@ -40,7 +40,7 @@ main() {
         sync
     fi
     echo -ne "${YELLOW}"
-    read -n 1 -s -r -p "Press A to continue"
+    printf '%s' "Press A to continue"; read -r _
     echo -ne "${NC}\n"
     clear
 
@@ -129,7 +129,7 @@ download_update() {
         check_available_space "$(($Release_size_MB + 500))"
         if [ $? -eq 1 ]; then
             echo -ne "${YELLOW}"
-            read -n 1 -s -r -p "Press A to exit"
+            printf '%s' "Press A to exit"; read -r _
             exit 3
         fi
         clear
@@ -139,7 +139,7 @@ download_update() {
         if ! [ $? -eq 0 ] || ! [ -f "$updatedir/CrossMix-OS_v$Release_Version.zip" ]; then
             echo -e "${RED}CrossMix update download has failed!${NC}"
             echo -ne "${YELLOW}"
-            read -n 1 -s -r -p "Press A to exit"
+            printf '%s' "Press A to exit"; read -r _
             echo "download failed" >/tmp/ota_release_result
             exit
             # killall -2 SimpleTerminal
@@ -171,7 +171,7 @@ apply_update() {
     clear
     if [ "$Mychoice" = "Yes" ]; then
 
-        UpdateScript="https://raw.githubusercontent.com/cizia64/CrossMix-OS/refs/tags/v$Release_Version/System/usr/trimui/scripts/crossmix_update.sh"
+        UpdateScript="https://raw.githubusercontent.com/jukaLang/JukaCrossMix-OS/refs/tags/v$Release_Version/System/usr/trimui/scripts/crossmix_update.sh"
         DownloadPath="/mnt/SDCARD/System/usr/trimui/scripts/crossmix_update.sh"
 
         download_file $UpdateScript -f "$DownloadPath" -t "Upgrading Update Script"
@@ -179,7 +179,7 @@ apply_update() {
             echo -e "${RED}Update Script upgrade has failed!${NC}"
             echo -ne "${YELLOW}"
             echo "download failed" >/tmp/ota_release_result
-            read -n 1 -s -r -p "Press A to exit"
+            printf '%s' "Press A to exit"; read -r _
             exit
             # killall -2 SimpleTerminal
         fi

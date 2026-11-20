@@ -5,18 +5,26 @@ export LD_LIBRARY_PATH="/mnt/SDCARD/System/lib:/usr/trimui/lib:$LD_LIBRARY_PATH"
 TARGET_PARTITION="/dev/mmcblk0p1"
 MOUNT_POINT="/mnt/emmcblk0p1"
 Current_FW_Revision=$(grep 'DISTRIB_DESCRIPTION' /etc/openwrt_release | cut -d '.' -f 3)
-read -r Current_device </etc/trimui_device.txt
+read -r current_device </etc/trimui_device.txt
 
-if [ "$Current_device" = "tsp" ]; then
-
+case "$current_device" in
+tsp)
     if [ "$Current_FW_Revision" -gt "20240413" ] && [ "$Current_FW_Revision" -lt "20250505" ]; then # on firmware hotfix 9 there is less space than before on /dev/mmcblk0p1 so we avoid to flash the logo
         /mnt/SDCARD/System/usr/trimui/scripts/infoscreen.sh -m "Bootlogo is not compatible with this firmware ($Current_FW_Revision)." -t 3
         exit 1
     fi
     src_dir="/mnt/SDCARD/Apps/BootLogo/Images_1280x720/"
-else
+    ;;
+tsps)
+    src_dir="/mnt/SDCARD/Apps/BootLogo/Images_1280x720/"
+    ;;
+brick | brickpro)
     src_dir="/mnt/SDCARD/Apps/BootLogo/Images_1024x768/"
-fi
+    ;;
+*)
+    src_dir="/mnt/SDCARD/Apps/BootLogo/Images_1280x720/"
+    ;;
+esac
 
 LD_LIBRARY_PATH="/mnt/SDCARD/System/lib:/usr/trimui/lib:/mnt/SDCARD/System/bin/imagemagick/lib64:$LD_LIBRARY_PATH"
 export MAGICK_CODER_MODULE_PATH="/mnt/SDCARD/System/bin/imagemagick/lib64/ImageMagick-6.9.10/modules-Q16/coders/"
@@ -55,16 +63,22 @@ if [ -f "$SOURCE_FILE" ]; then
 
     echo "Resolution of \"$filename\" is: ${width}x${height}"
 
-    ################# Check if the resolution is 1280x720 #################
-    if [ "$width" -gt 1280 ] || [ "$height" -gt 720 ]; then
+    ################# Check if the resolution matches the device panel #################
+    case "$current_device" in
+    tsp | tsps) expected_width=1280; expected_height=720 ;;
+    brick | brickpro) expected_width=1024; expected_height=720 ;;
+    *) expected_width=1280; expected_height=720 ;;
+    esac
+
+    if [ "$width" -gt "$expected_width" ] || [ "$height" -gt "$expected_height" ]; then
         echo "The image \"$filename\" is too large. Quitting without flash."
-        [ "$silent" -eq 0 ] && /mnt/SDCARD/System/usr/trimui/scripts/infoscreen.sh -i "$SOURCE_FILE" -m "Image resolution is larger than expected, exiting. (${width}x${height} instead of 1280x720)" -t 5 -c "220,0,0"
+        [ "$silent" -eq 0 ] && /mnt/SDCARD/System/usr/trimui/scripts/infoscreen.sh -i "$SOURCE_FILE" -m "Image resolution is larger than expected, exiting. (${width}x${height} instead of ${expected_width}x${expected_height})" -t 5 -c "220,0,0"
         exit 1
-    elif [ "$width" -lt 1280 ] || [ "$height" -lt 720 ]; then
+    elif [ "$width" -lt "$expected_width" ] || [ "$height" -lt "$expected_height" ]; then
         echo "The image \"$filename\" is too small. Not recommended but should be OK."
-        [ "$silent" -eq 0 ] && /mnt/SDCARD/System/usr/trimui/scripts/infoscreen.sh -i "$SOURCE_FILE" -m "Image resolution is smaller than expected. (${width}x${height} instead of 1280x720)" -t 5 -c "220,0,0"
+        [ "$silent" -eq 0 ] && /mnt/SDCARD/System/usr/trimui/scripts/infoscreen.sh -i "$SOURCE_FILE" -m "Image resolution is smaller than expected. (${width}x${height} instead of ${expected_width}x${expected_height})" -t 5 -c "220,0,0"
     else
-        echo "The image \"$filename\" has a resolution of 1280x720. Let's continue !"
+        echo "The image \"$filename\" has the expected resolution (${expected_width}x${expected_height}). Let's continue !"
     fi
 
     ################# Check if file type is BMP #################
@@ -113,7 +127,12 @@ if [ -f "$SOURCE_FILE" ]; then
     if ! cmp -s "$SOURCE_FILE" "$MOUNT_POINT/bootlogo.bmp"; then
         # The flashed file is different from the source, we restore the default logo
         rm "$MOUNT_POINT/bootlogo.bmp"
-        cp "$src_dir/- Default Trimui.bmp" "$MOUNT_POINT/bootlogo.bmp"
+        if [ -f "$src_dir/- Default Trimui.bmp" ]; then
+            cp "$src_dir/- Default Trimui.bmp" "$MOUNT_POINT/bootlogo.bmp"
+        else
+            # Brick folder ships no stock logo; fall back to the brand logo
+            cp "$src_dir/- JukaMix.bmp" "$MOUNT_POINT/bootlogo.bmp"
+        fi
     fi
     sync
     sleep 0.5
