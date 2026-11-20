@@ -9,15 +9,13 @@ mount > /mnt/SDCARD/Logs/mount.txt 2>&1
   done
 ) &
 
-# Check both SD and UDISK app dirs
+# Extract MainUI launch-related strings
 {
-  echo "=== SD trimui/app ==="
-  ls -la /mnt/SDCARD/trimui/app/ 2>&1
-  echo "=== UDISK trimui/app ==="
-  ls -la /mnt/UDISK/trimui/app/ 2>&1
-  echo "=== UDISK cmd_to_run.sh ==="
-  cat /mnt/UDISK/trimui/app/cmd_to_run.sh 2>&1
-} > /mnt/SDCARD/Logs/udisk_app.txt 2>&1
+  echo "=== MainUI binary location ==="
+  ls -la /usr/trimui/bin/MainUI 2>&1
+  echo "=== Launch-related strings ==="
+  /mnt/SDCARD/System/bin/strings /usr/trimui/bin/MainUI 2>/dev/null | grep -iE "launch|cmd_to_run|/mnt/SDCARD/Apps|system\\(" | head -n 100
+} > /mnt/SDCARD/Logs/mainui_strings.txt 2>&1
 
 # Test TestApp launch.sh directly
 {
