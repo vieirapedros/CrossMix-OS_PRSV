@@ -1,0 +1,26 @@
+name: Track upstream fw 1.1.1 support
+
+on:
+  schedule:
+    - cron: '0 12 1 * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check upstream for fw 1.1.1 support
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/cizia64/CrossMix-OS/releases/latest)
+          TAG=$(echo "$LATEST" | jq -r '.tag_name')
+          BODY=$(echo "$LATEST" | jq -r '.body')
+          if echo "$BODY" | grep -qiE '1\.1\.1|full support|fully compatible'; then
+            gh issue create \
+              -R vieirapedros/CrossMix-OS_PRSV \
+              -t "Upstream release $TAG may support fw 1.1.1" \
+              -b "Upstream release $TAG mentions fw 1.1.1 compatibility.\n\nRelease: https://github.com/cizia64/CrossMix-OS/releases/tag/$TAG\n\n$body"
+          else
+            echo "No fw 1.1.1 support mentioned in latest release."
+          fi
