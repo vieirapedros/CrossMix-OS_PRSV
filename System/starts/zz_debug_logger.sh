@@ -5,7 +5,10 @@ mount > /mnt/SDCARD/Logs/mount.txt 2>&1
 (
   while true; do
     tail -n 300 /tmp/log/messages > /mnt/SDCARD/Logs/mainui.log 2>/dev/null
-    sleep 5
+    if [ -f /tmp/cmd_to_run.sh ]; then
+      cp /tmp/cmd_to_run.sh /mnt/SDCARD/Logs/cmd_to_run_snapshot.txt 2>/dev/null
+    fi
+    sleep 2
   done
 ) &
 
