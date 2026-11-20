@@ -1,7 +1,0 @@
-{
-"label":"Battery Guard",
-"icon":"icon.png",
-"iconsel":"icon.png",
-"launch":"launch.sh",
-"description":"Battery monitoring"
-}
