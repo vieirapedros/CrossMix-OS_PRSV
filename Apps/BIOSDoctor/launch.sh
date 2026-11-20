@@ -1,2 +1,2 @@
 #!/bin/sh
-/mnt/SDCARD/Apps/Terminal/launch.sh /mnt/SDCARD/Apps/BIOSDoctor/biosdoctor.sh
+/mnt/SDCARD/Apps/Terminal/launch.sh sh /mnt/SDCARD/Apps/BIOSDoctor/biosdoctor.sh
