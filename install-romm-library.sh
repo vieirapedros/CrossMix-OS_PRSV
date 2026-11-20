@@ -31,6 +31,17 @@ if [ ! -f "$TARGET/Apps/RomMLibrary/icon.png" ] && [ -f "$TARGET/Apps/Reboot/ico
   cp "$TARGET/Apps/Reboot/icon.png" "$TARGET/Apps/RomMLibrary/icon.png"
 fi
 
+if [ ! -f "$TARGET/Data/romm/config.json" ]; then
+  cat > "$TARGET/Data/romm/config.json" <<'EOF'
+{
+  "url": "https://nas.tail729de1.ts.net:8444",
+  "token": "",
+  "download_dir": "/mnt/SDCARD/Roms",
+  "cache_dir": "/mnt/SDCARD/Data/romm/cache"
+}
+EOF
+fi
+
 chmod +x "$TARGET/Apps/RomMLibrary/launch.sh" \
   "$TARGET/Apps/RomMLibrary/romm.sh" \
   "$TARGET/Apps/RomMLibrary/lib/api.sh" \
@@ -40,4 +51,4 @@ chmod +x "$TARGET/Apps/RomMLibrary/launch.sh" \
 sync 2>/dev/null || true
 
 echo "RomM Library instalado em: $TARGET/Apps/RomMLibrary"
-echo "Configure o token em: $TARGET/Apps/RomMLibrary/config.json"
+echo "Configure URL e token em: $TARGET/Data/romm/config.json"

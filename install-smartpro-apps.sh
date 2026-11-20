@@ -38,6 +38,17 @@ mkdir -p "$TARGET/Data/romm/cache/covers" "$TARGET/Data/romm/cache/metadata" \
   "$TARGET/Data/biosdoctor" "$TARGET/Data/batteryguard" \
   "$TARGET/Data/theme-switcher"
 
+if [ ! -f "$TARGET/Data/romm/config.json" ]; then
+  cat > "$TARGET/Data/romm/config.json" <<'EOF'
+{
+  "url": "https://nas.tail729de1.ts.net:8444",
+  "token": "",
+  "download_dir": "/mnt/SDCARD/Roms",
+  "cache_dir": "/mnt/SDCARD/Data/romm/cache"
+}
+EOF
+fi
+
 for app in "${APPS[@]}"; do
   if [ ! -d "$REPO_ROOT/Apps/$app" ]; then
     echo "Aviso: $app nao encontrado no repositorio."
@@ -59,4 +70,4 @@ sync 2>/dev/null || true
 
 echo ""
 echo "Instalacao concluida em: $TARGET"
-echo "Configure RomM em: $TARGET/Apps/RomMLibrary/config.json"
+echo "Configure RomM em: $TARGET/Data/romm/config.json"

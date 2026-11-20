@@ -1,7 +1,7 @@
 #!/bin/sh
 # Navegador RomM: plataformas, ROMs e download
 
-CONFIG="${1:-/mnt/SDCARD/Apps/RomMLibrary/config.json}"
+CONFIG="${1:-/mnt/SDCARD/Data/romm/config.json}"
 . "$(dirname "$0")/api.sh"
 . "$(dirname "$0")/download.sh"
 
