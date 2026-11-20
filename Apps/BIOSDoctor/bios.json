@@ -1,0 +1,8 @@
+{
+  "GBA": ["gba_bios.bin"],
+  "PS": ["SCPH1001.bin", "SCPH5501.bin", "SCPH7001.bin"],
+  "DC": ["dc_boot.bin", "dc_flash.bin"],
+  "SATURN": ["saturn_bios.bin"],
+  "SEGACD": ["bios_CD_E.bin", "bios_CD_U.bin", "bios_CD_J.bin"],
+  "PSP": []
+}

@@ -1,0 +1,5 @@
+{
+  "warning": 20,
+  "critical": 10,
+  "interval_seconds": 60
+}

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+TARGET="${1:-}"
+
+if [ -z "$TARGET" ]; then
+  read -rp "Caminho do cartao SD montado: " TARGET
+fi
+
+TARGET="${TARGET%/}"
+
+if [ ! -d "$TARGET" ]; then
+  echo "Erro: $TARGET nao existe."
+  exit 1
+fi
+
+if [ ! -d "$TARGET/Apps" ]; then
+  read -rp "$TARGET nao parece ser um cartao CrossMix. Continuar mesmo assim? [y/N] " answer
+  case "$answer" in
+    [yY]*) ;;
+    *) exit 1 ;;
+  esac
+fi
+
+mkdir -p "$TARGET/Apps/RomMLibrary/lib" "$TARGET/Data/romm/cache/covers" "$TARGET/Data/romm/cache/metadata"
+
+cp -a "$REPO_ROOT/Apps/RomMLibrary/." "$TARGET/Apps/RomMLibrary/"
+chmod +x "$TARGET/Apps/RomMLibrary/launch.sh" \
+  "$TARGET/Apps/RomMLibrary/romm.sh" \
+  "$TARGET/Apps/RomMLibrary/lib/api.sh" \
+  "$TARGET/Apps/RomMLibrary/lib/download.sh" \
+  "$TARGET/Apps/RomMLibrary/lib/browse.sh" 2>/dev/null || true
+
+sync 2>/dev/null || true
+
+echo "RomM Library instalado em: $TARGET/Apps/RomMLibrary"
+echo "Configure o token em: $TARGET/Apps/RomMLibrary/config.json"
