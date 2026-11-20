@@ -9,10 +9,18 @@ mount > /mnt/SDCARD/Logs/mount.txt 2>&1
   done
 ) &
 
-# Test TestApp launch.sh immediately
+# Check both SD and UDISK app dirs
 {
-  echo "=== TestApp folder ==="
-  ls -la /mnt/SDCARD/Apps/TestApp/ 2>&1
+  echo "=== SD trimui/app ==="
+  ls -la /mnt/SDCARD/trimui/app/ 2>&1
+  echo "=== UDISK trimui/app ==="
+  ls -la /mnt/UDISK/trimui/app/ 2>&1
+  echo "=== UDISK cmd_to_run.sh ==="
+  cat /mnt/UDISK/trimui/app/cmd_to_run.sh 2>&1
+} > /mnt/SDCARD/Logs/udisk_app.txt 2>&1
+
+# Test TestApp launch.sh directly
+{
   echo "=== Running launch.sh ==="
   /mnt/SDCARD/Apps/TestApp/launch.sh
   echo "exit_code=$?"
