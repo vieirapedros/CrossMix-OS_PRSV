@@ -27,8 +27,16 @@ mkdir -p "$TARGET/Apps/RomMLibrary/lib" "$TARGET/Data/romm/cache/covers" "$TARGE
 
 cp -a "$REPO_ROOT/Apps/RomMLibrary/." "$TARGET/Apps/RomMLibrary/"
 
-if [ ! -f "$TARGET/Apps/RomMLibrary/icon.png" ] && [ -f "$TARGET/Apps/Reboot/icon.png" ]; then
-  cp "$TARGET/Apps/Reboot/icon.png" "$TARGET/Apps/RomMLibrary/icon.png"
+ICON_SOURCE=""
+for candidate in "$TARGET/Apps/MusicPlayer/icon.png" "$TARGET/Apps/Reboot/icon.png"; do
+  if [ -f "$candidate" ]; then
+    ICON_SOURCE="$candidate"
+    break
+  fi
+done
+
+if [ -n "$ICON_SOURCE" ] && [ ! -f "$TARGET/Apps/RomMLibrary/icon.png" ]; then
+  cp "$ICON_SOURCE" "$TARGET/Apps/RomMLibrary/icon.png"
 fi
 
 if [ ! -f "$TARGET/Data/romm/config.json" ]; then

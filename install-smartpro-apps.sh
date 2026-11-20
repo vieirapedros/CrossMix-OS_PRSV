@@ -49,6 +49,14 @@ if [ ! -f "$TARGET/Data/romm/config.json" ]; then
 EOF
 fi
 
+ICON_SOURCE=""
+for candidate in "$TARGET/Apps/MusicPlayer/icon.png" "$TARGET/Apps/Reboot/icon.png"; do
+  if [ -f "$candidate" ]; then
+    ICON_SOURCE="$candidate"
+    break
+  fi
+done
+
 for app in "${APPS[@]}"; do
   if [ ! -d "$REPO_ROOT/Apps/$app" ]; then
     echo "Aviso: $app nao encontrado no repositorio."
@@ -58,8 +66,8 @@ for app in "${APPS[@]}"; do
   mkdir -p "$TARGET/Apps/$app"
   cp -a "$REPO_ROOT/Apps/$app/." "$TARGET/Apps/$app/"
 
-  if [ ! -f "$TARGET/Apps/$app/icon.png" ] && [ -f "$TARGET/Apps/Reboot/icon.png" ]; then
-    cp "$TARGET/Apps/Reboot/icon.png" "$TARGET/Apps/$app/icon.png"
+  if [ -n "$ICON_SOURCE" ] && [ ! -f "$TARGET/Apps/$app/icon.png" ]; then
+    cp "$ICON_SOURCE" "$TARGET/Apps/$app/icon.png"
   fi
 
   find "$TARGET/Apps/$app" -type f -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
