@@ -11,7 +11,7 @@ PATH="/mnt/SDCARD/System/bin:$PATH"
 export LD_LIBRARY_PATH="/mnt/SDCARD/System/lib:/usr/trimui/lib:$LD_LIBRARY_PATH"
 
 TAILSCALED="/mnt/SDCARD/System/bin/tailscaled"
-TAILSCALE="/mnt/SDCARD/System/bin/tailscaled"
+TAILSCALE="/mnt/SDCARD/System/bin/tailscale"
 TAILSCALED_STATE_FILE="/mnt/SDCARD/System/etc/tailscale/tailscaled.state"
 JSON_FILE="/mnt/SDCARD/System/etc/crossmix.json"
 LOGIN_LOG="/mnt/SDCARD/System/etc/tailscale/login.txt"
@@ -49,8 +49,8 @@ echo -e "${BLUE}Applying \"$(basename "$0" .sh)\" by default...${NONE}"
 /mnt/SDCARD/System/bin/jq '. += {"Tailscale": 1}' "$JSON_FILE" >"/tmp/json_file.tmp" && mv "/tmp/json_file.tmp" "$JSON_FILE"
 
 # Stop any existing Tailscale process and start it with the state file
-pkill -9 "$TAILSCALED"
-pkill -9 "$TAILSCALE"
+pkill -9 -x tailscaled
+pkill -9 -x tailscale
 
 mkdir -p "$STATE_DIRECTORY"
 

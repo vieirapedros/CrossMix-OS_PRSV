@@ -11,7 +11,7 @@ fi
 /mnt/SDCARD/System/bin/jq '. += {"Syncthing": 0}' "$json_file" >"/tmp/json_file.tmp" && mv "/tmp/json_file.tmp" "$json_file"
 sync
 
-pkill /mnt/SDCARD/System/bin/syncthing
+pkill -x syncthing
 
 # we modify the DB entries to reflect the current state
 /mnt/SDCARD/System/usr/trimui/scripts/mainui_state_update.sh "Syncthing" "disabled"

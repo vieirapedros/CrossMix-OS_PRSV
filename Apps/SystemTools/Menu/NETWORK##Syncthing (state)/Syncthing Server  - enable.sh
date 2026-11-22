@@ -24,7 +24,7 @@ fi
 
 /mnt/SDCARD/System/bin/jq '. += {"Syncthing": 1}' "$json_file" >"/tmp/json_file.tmp" && mv "/tmp/json_file.tmp" "$json_file"
 
-pkill $SYNCTHING
+pkill -x syncthing
 if ! [ -f $CONFIG_FILE ]; then
   mkdir -p "$CONFIGPATH/data"
   $SYNCTHING generate --no-default-folder --gui-user="$SYNCUSER" --gui-password="$SYNCPASS" --config="$CONFIGPATH"

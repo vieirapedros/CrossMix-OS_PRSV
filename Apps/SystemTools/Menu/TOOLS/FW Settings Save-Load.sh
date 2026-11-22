@@ -108,10 +108,11 @@ case "$selected_action" in
     # If not in command line mode, ask the user to select the backup file
     if [ -z "$ARCHIVE_PATH" ]; then
         selector_output=$(selector -fs 150 -t "Choose a backup file to restore:" -d "/mnt/SDCARD/System/backups/firmware_settings/$current_device/" | grep "You selected")
-        echo "$cleaned_input" | grep -q "No file selected" && {
+        # B pressed in the file chooser: the selector prints no "You selected" line
+        if [ -z "$selector_output" ]; then
             infoscreen.sh -m "Exiting..."
             exit 0
-        }
+        fi
         ARCHIVE_PATH="${selector_output#*: }"
     fi
 

@@ -50,7 +50,7 @@ for db_dir in "$database_dir"/*; do
                     NEOGEO) new_value="SNK - Neo Geo" ;;
                     NEOCD) new_value="SNK - Neo Geo CD" ;;
                     NGP) new_value="SNK - Neo Geo Pocket" ;;
-                    NGP) new_value="SNK - Neo Geo Pocket Color" ;;
+                    NGC) new_value="SNK - Neo Geo Pocket Color" ;;
                     SCUMMVM) new_value="ScummVM" ;;
                     SEGA32X) new_value="Sega - 32X" ;;
                     DC) new_value="Sega - Dreamcast" ;;
@@ -108,7 +108,7 @@ for db_dir in "$database_dir"/*; do
                     NEOGEO) new_value="SNK - Neo Geo" ;;
                     NEOCD) new_value="SNK - Neo Geo CD" ;;
                     NGP) new_value="SNK - Neo Geo Pocket" ;;
-                    NGP) new_value="SNK - Neo Geo Pocket Color" ;;
+                    NGC) new_value="SNK - Neo Geo Pocket Color" ;;
                     SCUMMVM) new_value="ScummVM" ;;
                     SEGA32X) new_value="Sega - 32X" ;;
                     DC) new_value="Sega - Dreamcast" ;;

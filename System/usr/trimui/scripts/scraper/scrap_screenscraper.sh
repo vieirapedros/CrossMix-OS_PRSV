@@ -197,10 +197,9 @@ get_ssSystemID() {
     SGB)                ssSystemID="127";;   # Super Game Boy
     SFX)                ssSystemID="105";;   # NEC PC Engine SuperGrafx
     SUFAMI)             ssSystemID="108";;   # Sufami Turbo
-    WS)                 ssSystemID="207";;   # Watara Supervision
-    WSC)                ssSystemID="207";;   # Watara Supervision
+    SUPERVISION)        ssSystemID="207";;   # Watara Supervision
+    WSC)                ssSystemID="45";;    # Bandai WonderSwan Color (same id as WS below)
     SEGA32X)            ssSystemID="19";;    # Sega 32X
-    SFX)                ssSystemID="19";;    # Sega 32X
     THOMSON)            ssSystemID="141";;   # Thomson
     TIC)                ssSystemID="222";;   # TIC-80
     UZEBOX)             ssSystemID="216";;   # Uzebox
