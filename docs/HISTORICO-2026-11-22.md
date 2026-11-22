@@ -59,11 +59,12 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 | `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (26 arquivos). |
 | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
 | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
+| `RetroArch-probe-sdcard.zip` | Extrair na raiz do cartão: troca `Apps/RetroArch/launch.sh` e acrescenta `System/usr/trimui/scripts/ra_probe.sh` (sonda de diagnóstico, seção 8). |
 | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
 | `jukamix-romm-and-fixes.bundle` | Bundle git com a branch `fix/jukamix-review` (contém os dois commits; requer `d5102fab`). |
 | `SHA256SUMS.txt` | Hashes para conferir a integridade (`sha256sum -c SHA256SUMS.txt`). |
 
-Os dois zips são independentes. Patches e bundle servem só para o git; não vão ao cartão.
+Os três zips são independentes. Patches e bundle servem só para o git; não vão ao cartão.
 
 ## 5. Instalação resumida
 
@@ -84,15 +85,55 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir 
   `lib/download.sh`). O mais simples é remover o RomMLibrary antigo da `main` antes.
 - Alternativa: tratar a branch `release/2026-11-22-jukamix-romm` como a nova base e abandonar as
   sobras da fase anterior.
+- Atenção: o workflow de release do JukaMix (`JukaMix-OS Release.yml`) só remove `_assets scripts
+  tests schemas packages .github` antes de empacotar a imagem. As pastas `releases/` e `docs/`
+  entrariam na imagem se a `main` voltar a gerar releases com elas; mova-as para fora ou
+  acrescente-as à lista de exclusão antes disso.
 
 ## 7. Limitações e pendências
 
 - **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 checagens).
-- **RetroArch preso na tela de loading** (relatado em 2026-11-22): a análise estática dos scripts
-  não achou a causa. Pendente: testar no JukaMix puro, rodar System Logs - Collect e enviar
-  `System/logs/diagnostics_<data>.txt`; testar versões mais antigas do RetroArch (segurar Y ao abrir).
+- **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
+  causa ainda não encontrada; ver a seção 8 (diagnósticos do aparelho e sonda).
 - Causa de os apps antigos não abrirem no fw 1.1.1: não determinada.
 - O id do ScreenScraper para WonderSwan Color (45) não foi confirmado online; pode ser 46.
 - No teste existente `tests/logging_test.sh` uma checagem falha no caminho que só usa `logread`;
   provavelmente é do ambiente de teste, não foi investigado.
 - RomM Library: sem suporte a IPv6 literal; os arquivos não são verificados por hash (só o tamanho esperado).
+
+## 8. RetroArch preso ao abrir por Apps → RetroArch (diagnósticos de 2026-11-22)
+
+Dados dos dois relatórios `System Logs - Collect` enviados (aparelho `tsp`, imagem 1.3.0, firmware
+patched 1.3.0, firmware 1.1.0, kernel 4.9.191):
+
+- **Jogos abrem normalmente pelos lançadores de emulador.** 8 lançamentos (Stella, PCSX, PPSSPP,
+  Virtual Boy, PicoDrive, NGP, mgba, MAME2003+) terminaram com `exit=0`. Eles usam `ra64.trimui` com
+  `-L <core>`. O problema é específico do menu: Apps → RetroArch roda o binário sem conteúdo.
+- **O RetroArch estava vivo, não morto.** O tick do watchdog (301 s após o boot) pegou
+  `ra64.trimui_tsp` em estado **D** (espera de E/S), com 47,55 s de CPU, carga 4,30 e 727 MB livres.
+  Sem falta de memória; temperatura normal.
+- **As "crash entries" são falsos positivos.** Casam só com linhas normais de boot que contêm a
+  palavra "watchdog" (`sunxi-wdt … Watchdog enabled`, `procd: - watchdog -`); `mmc2: error -22
+  whilst initialising SDIO card` é a inicialização do Wi-Fi (o Wi-Fi conectou). Não há panic, oops,
+  OOM nem erro de E/S no log do kernel.
+- **Os boots "NOT clean" são desligamentos forçados** pelo botão de energia. Como `/tmp` some, o log
+  da sessão travada se perde; e `Apps/RetroArch/launch.sh` não registra `start app=` (por isso a
+  sessão não aparece em "recent launches").
+- **Trocar a versão do RetroArch não resolveu** (relato do usuário), então a causa não parece estar
+  na versão do binário, e sim em algo comum a elas: configuração/dados lidos ao abrir o menu, o
+  desenho do menu (XMB, GL) no firmware patched, ou o caminho de áudio.
+- Diferenças do menu em relação ao lançamento com jogo: não passa por `common_launcher.sh`
+  nem por `cpufreq.sh`; abre o menu `xmb` (`menu_driver = "xmb"`); `ra_audio_switcher.sh` pode abrir
+  um diálogo (`presenter`) se o `mplayer` estiver rodando.
+
+**Sonda adicionada (`RetroArch-probe-sdcard.zip`).** `Apps/RetroArch/launch.sh` agora inicia em
+segundo plano `System/usr/trimui/scripts/ra_probe.sh`, que só lê `/proc` e anota em
+`System/logs/ra_probe.log`, a cada 5 s por até 240 s: estado e CPU por thread, em que função do
+kernel cada thread espera (`wchan`), arquivos abertos, contadores de E/S do cartão e carga. Se uma
+thread ficar em estado D por duas amostras seguidas (ou se existir o arquivo `System/etc/ra_strace`),
+anexa o `strace` por 4 s e registra quais arquivos o RetroArch está tocando. O RetroArch continua
+sendo executado em primeiro plano, como antes. Teste: `bash tests/ra_probe_test.sh` (30 checagens).
+
+Próximo passo: abrir Apps → RetroArch com a sonda instalada, forçar o desligamento se travar e enviar
+`System/logs/ra_probe.log`. Experimentos baratos em paralelo: (1) abrir um jogo e chamar o menu do
+RetroArch pelo atalho; (2) trocar `menu_driver = "xmb"` por `"rgui"` em `RetroArch/retroarch.cfg`.

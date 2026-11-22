@@ -19,6 +19,42 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
 
 ---
 
+## O que este fork adiciona (CrossMix-OS_PRSV)
+
+> Fork pessoal do JukaMix OS para o **Trimui Smart Pro** (fw 1.1.1), baseado no commit upstream
+> `d5102fab`. Só o que está listado aqui difere do JukaMix; **o resto deste README é do JukaMix**
+> e foi deixado intacto para facilitar a sincronização com o upstream.
+
+| O quê | Onde | Resumo |
+|---|---|---|
+| **RomM Library** (app novo) | `Apps/RomMLibrary/` | Navega e baixa jogos do seu servidor [RomM](https://romm.app) (rede local ou Tailscale) direto para `Roms/`. Assistente de primeiro uso, busca, salto por letra, progresso, retomada de download. Guia: [`Apps/RomMLibrary/README.md`](Apps/RomMLibrary/README.md) |
+| **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
+| **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S). Diagnóstico do travamento no loading; não altera o comportamento do RetroArch |
+| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35) e `bash tests/ra_probe_test.sh` (30). Precisam de `bash` |
+| **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
+
+**Instalar este fork no cartão:**
+
+1. Siga a seção [Install](#install) abaixo para o JukaMix (cartão FAT32, extrair na raiz). A imagem
+   do release é grande (~4,4 GB) e sai dividida em volumes `.001`, `.002`…: abra o `.001` com o 7-Zip.
+2. Ligue uma vez e confirme que o JukaMix puro funciona.
+3. Desligue e extraia na raiz do cartão, em qualquer ordem (são independentes):
+   `releases/2026-11-22/RomMLibrary-sdcard.zip`, `releases/2026-11-22/JukaMix-fixes-sdcard.zip`
+   (aceite substituir os 10 arquivos) e, para diagnosticar o RetroArch,
+   `releases/2026-11-22/RetroArch-probe-sdcard.zip` (substitui `Apps/RetroArch/launch.sh`). Para conferir a integridade, rode
+   `sha256sum -c SHA256SUMS.txt` dentro de `releases/2026-11-22/`.
+4. Ligue, conecte o Wi-Fi, ative o Tailscale (**System Tools → NETWORK → Tailscale**) e abra
+   **Apps → RomM Library**.
+
+**Branches:** `feat/romm-library` (só o app), `fix/jukamix-review` (app + correções) e
+`release/2026-11-22-jukamix-romm` (tudo + registro). Todas partem do JukaMix `d5102fab`, não da `main`.
+
+**Status:** testado **somente em simulação**, nunca no aparelho. Pendente: Apps → RetroArch fica preso na
+tela de loading no aparelho do autor (os jogos abrem normalmente). Os diagnósticos mostram o RetroArch
+vivo, em espera de E/S e com CPU alta; a causa ainda não foi achada. Ver a seção 8 do registro histórico.
+
+---
+
 ## Why JukaMix?
 
 JukaMix OS delivers a powerful, customizable experience — with improved settings, new features,

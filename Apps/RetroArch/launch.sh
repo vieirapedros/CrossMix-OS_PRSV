@@ -62,4 +62,11 @@ if [ -z "$SELECTED_FILE" ]; then
     fi
 fi
 
+# Sidecar: records what RetroArch is doing into System/logs/ra_probe.log (read-only, detached;
+# see System/usr/trimui/scripts/ra_probe.sh). Skipped when the script is not present.
+PROBE=/mnt/SDCARD/System/usr/trimui/scripts/ra_probe.sh
+if [ -f "$PROBE" ]; then
+    sh "$PROBE" "$SELECTED_FILE" >/dev/null 2>&1 &
+fi
+
 HOME="$RA_DIR/" "$RA_DIR/$SELECTED_FILE"
