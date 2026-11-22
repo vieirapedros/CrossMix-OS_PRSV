@@ -1,0 +1,4 @@
+# Configuracao local do RomM Library (URL, usuario, senha ou token): nunca versionar
+Data/romm/
+__pycache__/
+*.pyc

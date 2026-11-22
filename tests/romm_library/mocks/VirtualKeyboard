@@ -1,0 +1,12 @@
+#!/bin/sh
+# mock do VirtualKeyboard: fila $MOCK_DIR/vk.q  (text:VALOR | cancel)
+. "$(dirname "$0")/mocklib.sh"
+D=$MOCK_DIR
+bg=""; init=""; pw=0
+while [ $# -gt 0 ]; do
+  case "$1" in -i) bg=$2; shift 2 ;; -t) init=$2; shift 2 ;; -p) pw=1; shift ;; *) shift ;; esac
+done
+act=$(pop "$D/vk.q")
+printf 'VK bg=%s initial=[%s] pw=%s act=%s\n' "$(basename "$bg")" "$init" "$pw" "${act:-<fila vazia>}" >>"$D/vk.log"
+case "$act" in text:*) printf '[VKStart]%s[VKEnd]\n' "${act#text:}" ;; esac
+exit 0

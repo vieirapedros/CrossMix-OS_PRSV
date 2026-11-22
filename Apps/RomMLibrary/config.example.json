@@ -1,0 +1,10 @@
+{
+  "base_url": "http://100.x.y.z:8080",
+  "token": "rmm_COLE_AQUI_O_TOKEN_DE_API",
+  "username": "",
+  "password": "",
+  "page_size": "30",
+  "lang": "pt",
+  "insecure": "0",
+  "platform_map": { "gba": "GBA", "arcade": "FBNEO" }
+}

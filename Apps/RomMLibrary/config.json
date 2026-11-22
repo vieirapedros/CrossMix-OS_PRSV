@@ -1,0 +1,7 @@
+{
+"label":"RomM Library",
+"icon":"icon.png",
+"iconsel":"icon.png",
+"launch":"launch.sh",
+"description":"Browse and download games from your RomM server (works over Tailscale)."
+}

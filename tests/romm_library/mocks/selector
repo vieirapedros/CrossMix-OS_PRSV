@@ -1,0 +1,26 @@
+#!/bin/sh
+# mock do selector: escolhe segundo a fila $MOCK_DIR/sel.q  (contains:X | exact:X | idx:N | cancel)
+. "$(dirname "$0")/mocklib.sh"
+D=$MOCK_DIR
+title=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -t) title=$2; shift 2 ;;
+  -fs | -i | -d) shift 2 ;;
+  -c) shift; break ;;
+  *) shift ;;
+  esac
+done
+{ printf '=== %s\n' "$title"; for it in "$@"; do printf '  | %s\n' "$it"; done; } >>"$D/sel.log"
+act=$(pop "$D/sel.q")
+chosen=""
+case "$act" in
+contains:*) want=${act#contains:}; for it in "$@"; do case "$it" in *"$want"*) chosen=$it; break ;; esac; done ;;
+exact:*) want=${act#exact:}; for it in "$@"; do [ "$it" = "$want" ] && { chosen=$it; break; }; done ;;
+idx:*) n=${act#idx:}; i=0; for it in "$@"; do i=$((i + 1)); [ "$i" = "$n" ] && chosen=$it; done ;;
+cancel | "") : ;;
+esac
+case "$act" in cancel | "") ;; *) [ -n "$chosen" ] || echo "SELECTOR sem item para '$act' em '$title'" >>"$D/errors.log" ;; esac
+printf 'ACT %s -> %s\n' "${act:-<fila vazia>}" "${chosen:-<cancelou>}" >>"$D/sel.log"
+[ -n "$chosen" ] && printf 'You selected: %s\n' "$chosen"
+exit 0
