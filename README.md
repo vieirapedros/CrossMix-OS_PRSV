@@ -31,7 +31,7 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
 | **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
 | **Correção do travamento do RetroArch** | `trimui/app/trimui_inputd`, `System/resources/tsp_inputd`/`tsps_inputd`, `scripts/inputd-disable-ff.py` | O RetroArch travava no "loading" porque o daemon de entrada do TSP anuncia vibração (force feedback) mas nunca responde ao pedido do SDL. O patch troca 8 instruções para o controle virtual deixar de anunciar FF; o resto do daemon fica igual. Detalhes e limites: seção 8 do registro histórico |
 | **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S e, se travar em vibração, qual dispositivo e quem segura `/dev/uinput`). Não altera o comportamento do RetroArch |
-| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44) e `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`). Precisam de `bash` |
+| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
 | **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
 
 **Instalar este fork no cartão:**
@@ -51,10 +51,10 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
 **Branches:** `feat/romm-library` (só o app), `fix/jukamix-review` (app + correções) e
 `release/2026-11-22-jukamix-romm` (tudo + registro). Todas partem do JukaMix `d5102fab`, não da `main`.
 
-**Status:** testado **somente em simulação**, nunca no aparelho. O RetroArch (Apps → RetroArch) ficava preso
+**Status:** o app RomM Library e os demais ajustes foram testados **somente em simulação**. O RetroArch (Apps → RetroArch) ficava preso
 na tela de loading no aparelho do autor; o log da sonda mostrou a thread principal parada para sempre num
 pedido de vibração ao controle virtual, e o `RetroArch-fix-sdcard.zip` remove esse anúncio do daemon de
-entrada. **Ainda não confirmado no aparelho**: ver a seção 8 do registro histórico.
+entrada. **Confirmado no aparelho pelo usuário em 2026-11-23**; detalhes na seção 8 do registro histórico.
 
 ---
 

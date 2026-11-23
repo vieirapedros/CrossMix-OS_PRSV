@@ -2,3 +2,6 @@
 Data/romm/
 __pycache__/
 *.pyc
+
+# Marcas do Windows (fluxo alternativo NTFS) que sobram ao copiar arquivos baixados; nunca versionar
+*Zone.Identifier*

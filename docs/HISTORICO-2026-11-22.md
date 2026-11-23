@@ -94,10 +94,11 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir 
 
 ## 7. Limitações e pendências
 
-- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 + 44 + 24 checagens); o
+- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 + 44 + 24 + 8 checagens); o
   daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
 - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
-  causa provável identificada e correção entregue, **ainda não confirmada no aparelho**; ver a seção 8.
+  causa identificada, correção entregue e **confirmada no aparelho pelo usuário em 2026-11-23**
+  ("funcionando 100%"); ver a seção 8.
 - Causa de os apps antigos não abrirem no fw 1.1.1: não determinada.
 - O id do ScreenScraper para WonderSwan Color (45) não foi confirmado online; pode ser 46.
 - No teste existente `tests/logging_test.sh` uma checagem falha no caminho que só usa `logread`;
@@ -208,3 +209,57 @@ entrada de 26–28/11/2025 (controles do Pro S, D-pad e detecção de dispositiv
 3. Qualquer que seja o resultado, `System/logs/ra_probe.log` (ou *System Logs - Collect*) mostra o
    que aconteceu. A linha `installed input daemon: 41144 bytes crc32=1802bfaf` confirma que o daemon
    corrigido está em uso; `5055f537` significa que o original continua instalado.
+
+## 9. Revisão de uma avaliação externa da estrutura do JukaMix (2026-11-23)
+
+O usuário colou uma avaliação com quatro pontos sobre o repositório do JukaMix e pediu para conferir
+e aplicar o que estivesse certo. Cada ponto foi checado contra este repositório (a base é a mesma
+`d5102fab`). Veredito:
+
+| # | Alegação | Veredito | Ação |
+|---|----------|----------|------|
+| 1 | Arquivos `Zone.Identifier` órfãos em `Apps/BootLogo/themes/ff_VII` e `Zelda` | **Certo, mas o caminho está errado.** São 21 arquivos em `Apps/PortMaster/PortMaster/themes/ff_VII` (20) e `.../Zelda` (1); não existe `Apps/BootLogo/themes`. Todos têm 0 byte, menos um (170 bytes); nada os referencia | **Aplicado**: removidos; `.gitignore` e `tests/repo_hygiene_test.sh` impedem a volta |
+| 2 | Várias versões de RetroArch/PPSSPP/Flycast/ScummVM inflam o repositório | **Verdade como observação, mas é recurso, não sobra.** O seletor de versões do RetroArch (`Apps/RetroArch/launch.sh` procura `ra64.trimui_<aparelho>_*.bin`) e as variantes `PPSSPP_1.15.4`, `flycast_v1.0/v2.4` são intencionais; o usuário já usou o rebaixamento de versão. São 13 arquivos `ra64.*` (121 MB); os do Brick e do TSPS somam 60,1 MB de ~4,4 GB (1,3 %) | **Não aplicado.** Cortar variantes quebra funções e outros aparelhos; fica como decisão do usuário (ver abaixo) |
+| 3 | Inconsistência de nomes (`JukaCrossMix-OS`, `JukaMix-OS Release.yml`, `- JukaMix.bmp`, `JukCrossMix-OS.sh`) | **Os fatos estão certos, a conclusão não.** `JukCrossMix-OS` é um identificador interno, usado por `System/etc/crossmix.json`, pela pasta `Themes/JukCrossMix-OS`, pelo script do menu e pelos scripts de lançamento. Renomear quebra instalações existentes e o caminho do tema gravado nelas | **Não aplicado** |
+| 4 | Fontes NotoSans duplicadas em "BootLogo themes" e `Icons/Default/Logos` grande | **Parcialmente errado.** Não há temas de BootLogo com fontes; as fontes duplicadas estão nos 6 temas do PortMaster (Doom, Fallout, Stardew, Zelda, ff_VII, hiviz): 30 arquivos, 209,9 MB, **só 5 conteúdos distintos** (175 MB redundantes). `Icons/Default/Logos` são 492 arquivos, 11,8 MB: não é problema | **Aplicado só nas fontes**, ver 9.1 |
+
+### 9.1 Por que remover as fontes dos temas é seguro
+
+- As 30 cópias são **idênticas byte a byte** (sha256) às 5 fontes de `pylibs/resources/NotoSans.tar.xz`.
+- `pugwash` descompacta esse tar em `pylibs/resources` na primeira execução (e `funcs.txt` também), e
+  adiciona essa pasta à busca de recursos da interface. A busca (`ResourceManager.find`) percorre os
+  caminhos do último para o primeiro, então `pylibs/resources` já era consultada **antes** da pasta do
+  tema: as cópias dos temas nunca eram a usada.
+- O `default_theme` do PortMaster já funciona assim: o `theme.json` cita as cinco fontes e a pasta
+  não tem nenhuma.
+- As fontes só servem a idiomas chinês, coreano e japonês (`font[zh_*]`, `font[ko_KR]`,
+  `font[ja_JP]`). As fontes próprias de cada tema (Doom, Cinzel, Press Start 2P…) ficaram onde
+  estavam. `theme.md5` é só um texto guardado; não é conferido contra o conteúdo da pasta.
+- Efeito: **−209,9 MB** na imagem; depois da primeira execução do PortMaster, 35 MB são extraídos
+  uma vez em `pylibs/resources`.
+- Limite: não executei o PortMaster (precisa do aparelho). A conclusão vem da leitura do código e da
+  comparação dos arquivos. Para voltar atrás: `git revert` do commit, ou copiar as fontes de volta.
+
+### 9.2 Decisões que ficam com o usuário
+
+Cortar peso é possível, mas muda o que o sistema oferece, então não foi feito sem pedido:
+
+- Remover os binários do Brick e do TSPS (`brick.*`, `*_brick_*`, `*_tsps_*`; ~60 MB) se o cartão for só
+  para o TSP.
+- Reduzir variantes de RetroArch para uma ou duas versões do TSP.
+- Escolher entre `PPSSPP`/`PPSSPP_1.15.4` e `flycast_v1.0`/`flycast_v2.4`.
+- `Emus/SCUMMVM/ScummVM` tem 294 MB: é o maior item isolado de `Emus`.
+
+### 9.3 No cartão já instalado
+
+Os `Zone.Identifier` podem existir também no cartão. Para listar sem apagar (PowerShell, trocando `E:`
+pela letra do cartão):
+
+```powershell
+Get-ChildItem -Path E:\Apps\PortMaster -Recurse -Force -Filter *Zone.Identifier* | Select-Object FullName, Length
+```
+
+Conferida a lista, o mesmo comando com `| Remove-Item -WhatIf` mostra o que seria apagado, e sem
+`-WhatIf` apaga de fato. As fontes `NotoSans*-Regular.ttf` dentro de
+`Apps\PortMaster\PortMaster\themes\<tema>\` também podem ser apagadas à mão; extrair o pacote novo
+por cima não as recria.
