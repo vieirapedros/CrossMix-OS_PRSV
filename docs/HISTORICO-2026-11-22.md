@@ -63,7 +63,7 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 | `RetroArch-fix-sdcard.zip` | Extrair na raiz do cartão (5 arquivos): daemon de entrada sem o anúncio de vibração (`trimui/app/trimui_inputd`, `System/resources/tsp_inputd` e `tsps_inputd`), sonda corrigida (`ra_probe.sh`) e `Apps/RetroArch/launch.sh`. Seção 8. |
 | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
 | `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
-| `jukamix-romm-and-fixes.bundle` | Bundle git com a branch `release/2026-11-22-jukamix-romm` até a correção do RetroArch (requer `d5102fab`). |
+| `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até a correção do RetroArch (`1741df2e`, ref `HEAD`; requer `d5102fab`). Não contém o commit que adiciona os arquivos de `releases/`. |
 | `SHA256SUMS.txt` | Hashes para conferir a integridade (`sha256sum -c SHA256SUMS.txt`). |
 
 `RomMLibrary-sdcard.zip` e `JukaMix-fixes-sdcard.zip` são independentes entre si; `RetroArch-fix-sdcard.zip` substitui o `RetroArch-probe-sdcard.zip`. Patches e bundle servem só para o git; não vão ao cartão.

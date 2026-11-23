@@ -1,0 +1,1301 @@
+diff --git a/README.md b/README.md
+index a9dfbeda..cc450568 100644
+--- a/README.md
++++ b/README.md
+@@ -29,8 +29,9 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
+ |---|---|---|
+ | **RomM Library** (app novo) | `Apps/RomMLibrary/` | Navega e baixa jogos do seu servidor [RomM](https://romm.app) (rede local ou Tailscale) direto para `Roms/`. Assistente de primeiro uso, busca, salto por letra, progresso, retomada de download. Guia: [`Apps/RomMLibrary/README.md`](Apps/RomMLibrary/README.md) |
+ | **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
+-| **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S). Diagnóstico do travamento no loading; não altera o comportamento do RetroArch |
+-| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35) e `bash tests/ra_probe_test.sh` (30). Precisam de `bash` |
++| **Correção do travamento do RetroArch** | `trimui/app/trimui_inputd`, `System/resources/tsp_inputd`/`tsps_inputd`, `scripts/inputd-disable-ff.py` | O RetroArch travava no "loading" porque o daemon de entrada do TSP anuncia vibração (force feedback) mas nunca responde ao pedido do SDL. O patch troca 8 instruções para o controle virtual deixar de anunciar FF; o resto do daemon fica igual. Detalhes e limites: seção 8 do registro histórico |
++| **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S e, se travar em vibração, qual dispositivo e quem segura `/dev/uinput`). Não altera o comportamento do RetroArch |
++| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44) e `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`). Precisam de `bash` |
+ | **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
+ 
+ **Instalar este fork no cartão:**
+@@ -40,18 +41,20 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
+ 2. Ligue uma vez e confirme que o JukaMix puro funciona.
+ 3. Desligue e extraia na raiz do cartão, em qualquer ordem (são independentes):
+    `releases/2026-11-22/RomMLibrary-sdcard.zip`, `releases/2026-11-22/JukaMix-fixes-sdcard.zip`
+-   (aceite substituir os 10 arquivos) e, para diagnosticar o RetroArch,
+-   `releases/2026-11-22/RetroArch-probe-sdcard.zip` (substitui `Apps/RetroArch/launch.sh`). Para conferir a integridade, rode
+-   `sha256sum -c SHA256SUMS.txt` dentro de `releases/2026-11-22/`.
++   (aceite substituir os 10 arquivos) e `releases/2026-11-22/RetroArch-fix-sdcard.zip` (daemon de
++   entrada corrigido, sonda e `Apps/RetroArch/launch.sh`; **desligue e ligue de novo** depois, o daemon
++   só vale no boot). O `RetroArch-probe-sdcard.zip` da mesma pasta foi substituído por este. Para
++   conferir a integridade, rode `sha256sum -c SHA256SUMS.txt` dentro de `releases/2026-11-22/`.
+ 4. Ligue, conecte o Wi-Fi, ative o Tailscale (**System Tools → NETWORK → Tailscale**) e abra
+    **Apps → RomM Library**.
+ 
+ **Branches:** `feat/romm-library` (só o app), `fix/jukamix-review` (app + correções) e
+ `release/2026-11-22-jukamix-romm` (tudo + registro). Todas partem do JukaMix `d5102fab`, não da `main`.
+ 
+-**Status:** testado **somente em simulação**, nunca no aparelho. Pendente: Apps → RetroArch fica preso na
+-tela de loading no aparelho do autor (os jogos abrem normalmente). Os diagnósticos mostram o RetroArch
+-vivo, em espera de E/S e com CPU alta; a causa ainda não foi achada. Ver a seção 8 do registro histórico.
++**Status:** testado **somente em simulação**, nunca no aparelho. O RetroArch (Apps → RetroArch) ficava preso
++na tela de loading no aparelho do autor; o log da sonda mostrou a thread principal parada para sempre num
++pedido de vibração ao controle virtual, e o `RetroArch-fix-sdcard.zip` remove esse anúncio do daemon de
++entrada. **Ainda não confirmado no aparelho**: ver a seção 8 do registro histórico.
+ 
+ ---
+ 
+diff --git a/System/resources/tsp_inputd b/System/resources/tsp_inputd
+index 018d01ecbf88bb8dd6fb4bacb64f80dd49a6b5b0..7e44c3343c4651bebc059678f8bbb73320c838e3 100644
+GIT binary patch
+delta 142
+zcmdmSkZH$3rVTze_3{eLSDCmPf)dwuU20@l@#z7xuohU12UAQ5n>ubR>ad78VG(0s
+LXxMz(=4~<nbq6<a
+
+delta 142
+zcmdmSkZH$3rVTze^`T$?PiNw42ufVrb*YhI#is|%!dd|!F&<Pg@2~%-E1{`#1F7Ri
+fRp$s&hbCt8_5XAyG%@q9|EDuBHEcd@^EMd(*WE*i
+
+diff --git a/System/resources/tsps_inputd b/System/resources/tsps_inputd
+index 018d01ecbf88bb8dd6fb4bacb64f80dd49a6b5b0..7e44c3343c4651bebc059678f8bbb73320c838e3 100644
+GIT binary patch
+delta 142
+zcmdmSkZH$3rVTze_3{eLSDCmPf)dwuU20@l@#z7xuohU12UAQ5n>ubR>ad78VG(0s
+LXxMz(=4~<nbq6<a
+
+delta 142
+zcmdmSkZH$3rVTze^`T$?PiNw42ufVrb*YhI#is|%!dd|!F&<Pg@2~%-E1{`#1F7Ri
+fRp$s&hbCt8_5XAyG%@q9|EDuBHEcd@^EMd(*WE*i
+
+diff --git a/System/usr/trimui/scripts/ra_probe.sh b/System/usr/trimui/scripts/ra_probe.sh
+index ff63d13e..960980e8 100755
+--- a/System/usr/trimui/scripts/ra_probe.sh
++++ b/System/usr/trimui/scripts/ra_probe.sh
+@@ -5,9 +5,11 @@
+ #
+ #   ra_probe.sh <binary-name>        (started in the background by Apps/RetroArch/launch.sh)
+ #
+-# Every few seconds (default 5 s, for up to 240 s, or until RetroArch exits) it appends to
+-# System/logs/ra_probe.log: process state, CPU per thread, what each blocked thread is
+-# waiting on (wchan), the files RetroArch has open, I/O counters and load.
++# Every few seconds (default 5 s, for up to 240 s of real time, or until RetroArch exits) it
++# appends to System/logs/ra_probe.log: process state, CPU per thread, what each blocked
++# thread is waiting on (wchan), the files RetroArch has open, I/O counters and load.
++# When the main thread is blocked in a force-feedback upload (ioctl EVIOCSFF) it also logs
++# which input device that is, which process owns /dev/uinput and the installed input daemon.
+ # If a thread stays in uninterruptible sleep (state D) for two samples in a row, or if the
+ # file System/etc/ra_strace exists, it also attaches strace for a few seconds and logs the
+ # files/descriptors RetroArch is touching.
+@@ -49,6 +51,32 @@ log() { printf '%s\n' "$*" >>"$LOG"; }
+ stamp() { date '+%Y-%m-%d %H:%M:%S'; }
+ flush() { sync >/dev/null 2>&1 & }
+ 
++# Whole seconds since boot, from /proc/uptime (not affected by the clock being set by ntp).
++uptime_s() {
++    [ -r "$PROC/uptime" ] || return 1
++    read -r up _ <"$PROC/uptime" || return 1
++    up=${up%%.*}
++    case "$up" in
++        '' | *[!0-9]*) return 1 ;;
++    esac
++    printf '%s' "$up"
++}
++
++# Wait <seconds> of real time.  A single `sleep` is not enough on the console: the
++# background `sync` started by flush() ends while the shell sleeps, and with the busybox
++# ash `sleep` that returns at once, so a "240 s" probe lasted 15 s in the first field log.
++nap() {
++    start=$(uptime_s) || {
++        sleep "$1"
++        return 0
++    }
++    end=$((start + $1))
++    while now=$(uptime_s) && [ "$now" -lt "$end" ]; do
++        sleep 1
++    done
++    return 0
++}
++
+ # PID whose first two arguments name the RetroArch binary (argv[0] for the real ELF
+ # binary; argv[1] when it is run through an interpreter, as the tests do).
+ find_pid() {
+@@ -138,14 +166,60 @@ strace_burst() { # <pid> <seconds>
+     rm -f "$out"
+ }
+ 
++# Which input device is the blocked thread talking to, and who is on the other end?
++input_context() { # <pid> <fd>
++    log "   --- blocked in EVIOCSFF (force-feedback upload) on fd $2 ---"
++    tgt=$(readlink "$PROC/$1/fd/$2" 2>/dev/null)
++    log "   fd $2 -> ${tgt:-unknown}"
++    ev=${tgt##*/}
++    if [ -r "$PROC/bus/input/devices" ] && [ -n "$ev" ]; then
++        awk -v ev="$ev" '
++            /^$/ { if (hit) printf "%s", blk; blk = ""; hit = 0; next }
++            /^(I|N|P|H|B: EV|B: FF)/ { blk = blk "     " $0 "\n" }
++            /^H: Handlers/ { h = $0 " "; if (index(h, "=" ev " ") || index(h, " " ev " ")) hit = 1 }
++            END { if (hit) printf "%s", blk }
++        ' "$PROC/bus/input/devices" 2>/dev/null >>"$LOG"
++    fi
++    log "   input devices known to the kernel:"
++    grep -E '^N: Name' "$PROC/bus/input/devices" 2>/dev/null | sed 's/^/     /' >>"$LOG"
++    log "   processes holding /dev/uinput open:"
++    for f in "$PROC"/[0-9]*/fd/*; do
++        case "$(readlink "$f" 2>/dev/null)" in
++            *uinput*)
++                p=${f#"$PROC"/}
++                p=${p%%/*}
++                log "     pid $p ($(cat "$PROC/$p/comm" 2>/dev/null)) fd ${f##*/} exe=$(readlink "$PROC/$p/exe" 2>/dev/null)"
++                ;;
++        esac
++    done
++    inputd=$SDCARD/trimui/app/trimui_inputd
++    log "   installed input daemon: $(wc -c 2>/dev/null <"$inputd") bytes crc32=$(crc32 "$inputd" 2>/dev/null | head -n 1)"
++    for r in tsp tsps; do
++        [ -f "$SDCARD/System/resources/${r}_inputd" ] && log "   resources/${r}_inputd: $(wc -c <"$SDCARD/System/resources/${r}_inputd") bytes crc32=$(crc32 "$SDCARD/System/resources/${r}_inputd" 2>/dev/null | head -n 1)"
++    done
++    log "   --- end of input context ---"
++}
++
+ sample() { # <pid> <elapsed>
+     pid=$1
+-    log "-- t=+${2}s $(stamp)  load: $(cat "$PROC/loadavg" 2>/dev/null)"
++    log "-- t=+${2}s $(stamp)  uptime=$(cut -d' ' -f1 "$PROC/uptime" 2>/dev/null)  load: $(cat "$PROC/loadavg" 2>/dev/null)"
+     log "   $(grep -E '^(MemFree|Dirty|Writeback):' "$PROC/meminfo" 2>/dev/null | tr -s ' ' | tr '\n' ' ')"
+     disk=$(grep ' mmcblk1 ' "$PROC/diskstats" 2>/dev/null | head -n 1 | tr -s ' ')
+     [ -n "$disk" ] && log "   diskstats mmcblk1: $disk"
+     log "   process: $(grep -E '^(State|Threads|VmRSS):' "$PROC/$pid/status" 2>/dev/null | tr -s ' \t' ' ' | tr '\n' ' ')"
+-    log "   wchan=$(cat "$PROC/$pid/wchan" 2>/dev/null) syscall=$(cat "$PROC/$pid/syscall" 2>/dev/null)"
++    sc=$(cat "$PROC/$pid/syscall" 2>/dev/null)
++    log "   wchan=$(cat "$PROC/$pid/wchan" 2>/dev/null) syscall=$sc"
++    # aarch64: syscall 29 is ioctl; 0x40304580 is EVIOCSFF (upload a force-feedback effect)
++    case "$sc" in
++        "29 "*" 0x40304580 "*)
++            if [ "$ffdone" = 0 ]; then
++                ffdone=1
++                # shellcheck disable=SC2086
++                set -- $sc
++                input_context "$pid" "$(($2))"
++            fi
++            ;;
++    esac
+     io=$(tr '\n' ' ' 2>/dev/null <"$PROC/$pid/io")
+     [ -n "$io" ] && log "   io: $io"
+     threads "$pid"
+@@ -185,6 +259,8 @@ context "$pid"
+ elapsed=0
+ dwell=0
+ straced=0
++ffdone=0
++t0=$(uptime_s) || t0=
+ [ -f "$SDCARD/System/etc/ra_strace" ] && want_strace=1 || want_strace=0
+ while [ "$elapsed" -lt "$DURATION" ]; do
+     if [ ! -d "$PROC/$pid" ]; then
+@@ -201,9 +277,14 @@ while [ "$elapsed" -lt "$DURATION" ]; do
+         strace_burst "$pid" 4
+     fi
+     flush
+-    sleep "$INTERVAL"
+-    elapsed=$((elapsed + INTERVAL))
++    nap "$INTERVAL"
++    # real elapsed time when /proc/uptime is readable, the nominal one otherwise
++    if [ -n "$t0" ] && now=$(uptime_s); then
++        elapsed=$((now - t0))
++    else
++        elapsed=$((elapsed + INTERVAL))
++    fi
+ done
+-log "-- probe finished after ${DURATION}s; RetroArch still running $(stamp)"
++log "-- probe finished after ${elapsed}s; RetroArch still running $(stamp)"
+ flush
+ exit 0
+diff --git a/docs/HISTORICO-2026-11-22.md b/docs/HISTORICO-2026-11-22.md
+index 0c0ca0f2..86a73dba 100644
+--- a/docs/HISTORICO-2026-11-22.md
++++ b/docs/HISTORICO-2026-11-22.md
+@@ -59,19 +59,21 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
+ | `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (26 arquivos). |
+ | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
+ | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
+-| `RetroArch-probe-sdcard.zip` | Extrair na raiz do cartão: troca `Apps/RetroArch/launch.sh` e acrescenta `System/usr/trimui/scripts/ra_probe.sh` (sonda de diagnóstico, seção 8). |
++| `RetroArch-probe-sdcard.zip` | **Substituído pelo `RetroArch-fix-sdcard.zip`.** Primeira versão da sonda (troca `Apps/RetroArch/launch.sh` e acrescenta `ra_probe.sh`). Guardado só para registro. |
++| `RetroArch-fix-sdcard.zip` | Extrair na raiz do cartão (5 arquivos): daemon de entrada sem o anúncio de vibração (`trimui/app/trimui_inputd`, `System/resources/tsp_inputd` e `tsps_inputd`), sonda corrigida (`ra_probe.sh`) e `Apps/RetroArch/launch.sh`. Seção 8. |
+ | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
+-| `jukamix-romm-and-fixes.bundle` | Bundle git com a branch `fix/jukamix-review` (contém os dois commits; requer `d5102fab`). |
++| `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
++| `jukamix-romm-and-fixes.bundle` | Bundle git com a branch `release/2026-11-22-jukamix-romm` até a correção do RetroArch (requer `d5102fab`). |
+ | `SHA256SUMS.txt` | Hashes para conferir a integridade (`sha256sum -c SHA256SUMS.txt`). |
+ 
+-Os três zips são independentes. Patches e bundle servem só para o git; não vão ao cartão.
++`RomMLibrary-sdcard.zip` e `JukaMix-fixes-sdcard.zip` são independentes entre si; `RetroArch-fix-sdcard.zip` substitui o `RetroArch-probe-sdcard.zip`. Patches e bundle servem só para o git; não vão ao cartão.
+ 
+ ## 5. Instalação resumida
+ 
+ 1. Backup de `Roms/`, `BIOS/`, `Saves/`, `Data/` e personalizações.
+ 2. Formatar o cartão em FAT32 e extrair o release do JukaMix na raiz.
+ 3. Ligar uma vez e conferir o JukaMix puro (inclusive abrir um jogo no RetroArch).
+-4. Desligar, extrair os dois zips na raiz do cartão (aceitar substituir os 10 arquivos) e ligar de novo.
++4. Desligar, extrair na raiz do cartão `RomMLibrary-sdcard.zip`, `JukaMix-fixes-sdcard.zip` e `RetroArch-fix-sdcard.zip` (aceitar substituir os arquivos) e ligar de novo. O `RetroArch-fix` só vale depois de um reinício completo, porque o daemon de entrada é carregado no boot.
+ 5. Conectar o Wi-Fi, ligar o Tailscale (System Tools → NETWORK → Tailscale) e abrir Apps → RomM Library.
+ 
+ Detalhes de uso: `Apps/RomMLibrary/README.md`.
+@@ -92,48 +94,117 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir
+ 
+ ## 7. Limitações e pendências
+ 
+-- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 checagens).
++- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 + 44 + 24 checagens); o
++  daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
+ - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
+-  causa ainda não encontrada; ver a seção 8 (diagnósticos do aparelho e sonda).
++  causa provável identificada e correção entregue, **ainda não confirmada no aparelho**; ver a seção 8.
+ - Causa de os apps antigos não abrirem no fw 1.1.1: não determinada.
+ - O id do ScreenScraper para WonderSwan Color (45) não foi confirmado online; pode ser 46.
+ - No teste existente `tests/logging_test.sh` uma checagem falha no caminho que só usa `logread`;
+   provavelmente é do ambiente de teste, não foi investigado.
+ - RomM Library: sem suporte a IPv6 literal; os arquivos não são verificados por hash (só o tamanho esperado).
+ 
+-## 8. RetroArch preso ao abrir por Apps → RetroArch (diagnósticos de 2026-11-22)
++## 8. RetroArch preso ao abrir por Apps → RetroArch (diagnósticos de 2026-11-22/23)
+ 
+-Dados dos dois relatórios `System Logs - Collect` enviados (aparelho `tsp`, imagem 1.3.0, firmware
+-patched 1.3.0, firmware 1.1.0, kernel 4.9.191):
++### 8.1 O que os dois relatórios `System Logs - Collect` mostraram
++
++Aparelho `tsp`, imagem 1.3.0, firmware patched 1.3.0, firmware 1.1.0, kernel 4.9.191.
+ 
+-- **Jogos abrem normalmente pelos lançadores de emulador.** 8 lançamentos (Stella, PCSX, PPSSPP,
+-  Virtual Boy, PicoDrive, NGP, mgba, MAME2003+) terminaram com `exit=0`. Eles usam `ra64.trimui` com
+-  `-L <core>`. O problema é específico do menu: Apps → RetroArch roda o binário sem conteúdo.
+ - **O RetroArch estava vivo, não morto.** O tick do watchdog (301 s após o boot) pegou
+-  `ra64.trimui_tsp` em estado **D** (espera de E/S), com 47,55 s de CPU, carga 4,30 e 727 MB livres.
+-  Sem falta de memória; temperatura normal.
++  `ra64.trimui_tsp` em estado **D** (espera ininterrupta), com 47,55 s de CPU, carga 4,30 e 727 MB
++  livres. Sem falta de memória; temperatura normal.
+ - **As "crash entries" são falsos positivos.** Casam só com linhas normais de boot que contêm a
+   palavra "watchdog" (`sunxi-wdt … Watchdog enabled`, `procd: - watchdog -`); `mmc2: error -22
+   whilst initialising SDIO card` é a inicialização do Wi-Fi (o Wi-Fi conectou). Não há panic, oops,
+   OOM nem erro de E/S no log do kernel.
+ - **Os boots "NOT clean" são desligamentos forçados** pelo botão de energia. Como `/tmp` some, o log
+-  da sessão travada se perde; e `Apps/RetroArch/launch.sh` não registra `start app=` (por isso a
+-  sessão não aparece em "recent launches").
+-- **Trocar a versão do RetroArch não resolveu** (relato do usuário), então a causa não parece estar
+-  na versão do binário, e sim em algo comum a elas: configuração/dados lidos ao abrir o menu, o
+-  desenho do menu (XMB, GL) no firmware patched, ou o caminho de áudio.
+-- Diferenças do menu em relação ao lançamento com jogo: não passa por `common_launcher.sh`
+-  nem por `cpufreq.sh`; abre o menu `xmb` (`menu_driver = "xmb"`); `ra_audio_switcher.sh` pode abrir
+-  um diálogo (`presenter`) se o `mplayer` estiver rodando.
+-
+-**Sonda adicionada (`RetroArch-probe-sdcard.zip`).** `Apps/RetroArch/launch.sh` agora inicia em
+-segundo plano `System/usr/trimui/scripts/ra_probe.sh`, que só lê `/proc` e anota em
+-`System/logs/ra_probe.log`, a cada 5 s por até 240 s: estado e CPU por thread, em que função do
+-kernel cada thread espera (`wchan`), arquivos abertos, contadores de E/S do cartão e carga. Se uma
+-thread ficar em estado D por duas amostras seguidas (ou se existir o arquivo `System/etc/ra_strace`),
+-anexa o `strace` por 4 s e registra quais arquivos o RetroArch está tocando. O RetroArch continua
+-sendo executado em primeiro plano, como antes. Teste: `bash tests/ra_probe_test.sh` (30 checagens).
+-
+-Próximo passo: abrir Apps → RetroArch com a sonda instalada, forçar o desligamento se travar e enviar
+-`System/logs/ra_probe.log`. Experimentos baratos em paralelo: (1) abrir um jogo e chamar o menu do
+-RetroArch pelo atalho; (2) trocar `menu_driver = "xmb"` por `"rgui"` em `RetroArch/retroarch.cfg`.
++  da sessão travada se perde; e `Apps/RetroArch/launch.sh` não registra `start app=`.
++- **Trocar a versão do RetroArch não resolveu** (relato do usuário): a causa não está no binário do
++  RetroArch.
++- **Correção de uma conclusão anterior.** Eu havia escrito que "os jogos abrem normalmente e só o
++  menu trava". Isso se baseava em lançamentos feitos na primeira sessão, antes do reinício. Depois do
++  reinício os jogos podem travar do mesmo jeito (veja 8.3); não foi verificado.
++
++### 8.2 O que o log da sonda (`ra_probe.log`, 2026-11-23 03:03) provou
++
++- A **thread principal** do RetroArch ficou em estado D durante todo o log (≥ 9 s reais), parada em
++  `ioctl(fd 12, 0x40304580)`, ou seja **EVIOCSFF** (enviar um efeito de vibração a um dispositivo de
++  entrada). Pilha do kernel: `uinput_request_submit` ← `uinput_dev_upload_effect` ←
++  `input_ff_upload` ← `evdev_ioctl`. O alvo é um dispositivo criado por `/dev/uinput` e o kernel
++  espera, sem limite de tempo e sem poder ser interrompido, que o processo dono desse dispositivo
++  responda ao pedido.
++- A outra thread, de vídeo, continua trocando o quadro do framebuffer (`FBIOPAN_DISPLAY`, ~20 por
++  segundo): por isso a tela fica no "loading" e a CPU aparece alta.
++- Antes disso, a thread principal passa breves momentos em D em `evdev_release`/`joydev_release`
++  (`synchronize_rcu`): é o fechamento normal de dispositivos de entrada no início, não o problema.
++- **Defeito da própria sonda:** o log diz 240 s, mas cobre ~15 s de relógio. O `sleep` do shell do
++  aparelho voltava na hora (provável efeito do `sync` em segundo plano terminando durante a espera).
++  Corrigido na versão 2 (8.5). A conclusão acima não depende disso, mas o log não mostra se o travamento
++  teria passado depois.
++
++### 8.3 Causa provável (análise estática, não confirmada no aparelho)
++
++O daemon de entrada do JukaMix para o TSP/TSP-S (`System/resources/tsp_inputd`, 41 144 bytes, o mesmo
++arquivo que `tsps_inputd`) cria o controle virtual "Xbox 360" na função `trimui_setup_xpad` **anunciando
++force feedback**: liga `EV_FF`, seis bits `FF_*` (`0x50 0x60 0x51 0x58 0x59 0x5a`) e define
++`ff_effects_max = 16`. Mas o daemon **nunca atende** esses pedidos: não há `UI_BEGIN_FF_UPLOAD` /
++`UI_END_FF_UPLOAD` (0xc06055c8/c9) em nenhum dos três binários, e as três chamadas `read()` do programa
++leem só o inotify e a porta serial, nunca o descritor do uinput. O SDL2 (usado pelo RetroArch) envia um
++efeito de vibração assim que abre um controle com FF; com esse dispositivo o pedido nunca termina.
++
++- Esse recurso entrou no upstream em 2025-11-26 (commit `a984db64`, "Fix Pro S controls") e continua em
++  `b27bd415` e `321a16cd`. O `tsp_inputd` de 2025-09-01 (`e8804701`, 26 912 bytes, também o padrão em
++  `trimui/app/trimui_inputd`) **não** tem FF.
++- **Hipótese para "antes funcionava":** o cartão novo começa com o daemon padrão (sem FF); o
++  `inputd_switcher` instala o do dispositivo (com FF), mas só passa a valer depois de um reinício
++  (`restart_inputd` não reinicia com o MainUI ativo). Isso explicaria jogos abrindo na primeira sessão e
++  o travamento depois. É uma hipótese: o relatório não mostra qual daemon estava instalado.
++- **Não confirmado:** que o dono do dispositivo é o `trimui_inputd` (o log não listava quem segura
++  `/dev/uinput`; a sonda v2 passa a listar); e por que outros usuários do JukaMix não relatam o mesmo
++  (não investigado; pode ser que relatem).
++
++### 8.4 Correção entregue (`RetroArch-fix-sdcard.zip`)
++
++`scripts/inputd-disable-ff.py` troca **8 instruções de 32 bits** em `trimui_setup_xpad`: as sete
++chamadas `ioctl` que ligam `EV_FF` e os `FF_*` viram `nop` (os retornos nunca eram checados) e
++`ff_effects_max` passa de 16 para 0. O resto do binário é idêntico (41 144 bytes, mesmos offsets),
++então todas as correções de entrada mais novas do daemon continuam. O script confere as instruções ao
++redor antes de escrever e se recusa a mexer em qualquer outro arquivo.
++
++| Arquivo no cartão | Antes | Depois |
++|---|---|---|
++| `trimui/app/trimui_inputd` (daemon em uso) | conforme instalado pelo switcher (provavelmente o de 41 144 B, crc32 `5055f537`) ou o padrão de 26 912 B (`3356097d`) | 41 144 B, crc32 `1802bfaf` |
++| `System/resources/tsp_inputd` e `tsps_inputd` (origem do switcher) | 41 144 B, crc32 `5055f537` | 41 144 B, crc32 `1802bfaf` |
++
++Os três ficam iguais, então o `inputd_switcher` (que compara o instalado com o de `System/resources`)
++não desfaz a correção. O `brickpro_inputd` não tem FF e não foi tocado. Teste:
++`bash tests/inputd_noff_test.sh` (24 checagens: exatamente 8 palavras mudam, nos offsets esperados;
++o disassembly da função não tem mais `ioctl` de FF; os arquivos do cartão são idênticos).
++
++**Limite desta correção:** ela foi verificada por comparação de bytes e disassembly; o binário é
++aarch64 e depende de `/dev/uinput` e da UART do aparelho, por isso não foi executado aqui.
++
++**Se não resolver:** a sonda v2 diz exatamente o que acontece (8.5). Alternativa já disponível no
++próprio release do JukaMix: copiar o `trimui/app/trimui_inputd` original (26 912 B) por cima do daemon
++do cartão e do `System/resources/tsp_inputd`; ele não tem FF, mas também não tem as correções de
++entrada de 26–28/11/2025 (controles do Pro S, D-pad e detecção de dispositivo).
++
++### 8.5 Sonda v2 (`ra_probe.sh`)
++
++- Espera por **tempo real** (`/proc/uptime`), repetindo o `sleep` se ele voltar antes; cada amostra
++  mostra `t=+Ns` real e o `uptime`. A duração de 240 s passa a ser real.
++- Quando a thread principal está em `EVIOCSFF`, registra uma única vez: o descritor e o nó
++  `/dev/input/eventN`, o nome e as capacidades (`B: FF=`) desse dispositivo, a lista dos dispositivos de
++  entrada, **quais processos seguram `/dev/uinput`** e o tamanho/crc32 do daemon instalado e dos de
++  `System/resources`.
++- Continua só lendo `/proc` e nunca interfere no RetroArch. Teste: `bash tests/ra_probe_test.sh`
++  (44 checagens).
++
++### 8.6 Como conferir no aparelho
++
++1. Extrair `RetroArch-fix-sdcard.zip` na raiz do cartão (aceitar substituir) e **desligar e ligar de
++   novo** (reinício completo).
++2. Abrir Apps → RetroArch (e depois um jogo por um lançador de emulador). Esperado: o menu abre.
++3. Qualquer que seja o resultado, `System/logs/ra_probe.log` (ou *System Logs - Collect*) mostra o
++   que aconteceu. A linha `installed input daemon: 41144 bytes crc32=1802bfaf` confirma que o daemon
++   corrigido está em uso; `5055f537` significa que o original continua instalado.
+diff --git a/scripts/inputd-disable-ff.py b/scripts/inputd-disable-ff.py
+new file mode 100755
+index 00000000..3474ff53
+--- /dev/null
++++ b/scripts/inputd-disable-ff.py
+@@ -0,0 +1,184 @@
++#!/usr/bin/env python3
++"""Stop a JukaMix trimui_inputd (aarch64) from advertising force feedback.
++
++Why
++---
++The tsp/tsps input daemons built since 2025-11-26 create the virtual Xbox-360 pad with
++EV_FF, six FF_* bits and ff_effects_max=16 (function trimui_setup_xpad), but nothing in
++the daemon ever reads the uinput fd or answers UI_BEGIN_FF_UPLOAD / UI_END_FF_UPLOAD.
++Any program that uploads a rumble effect to that pad (SDL2 does it when it opens the pad,
++and RetroArch's SDL2 joypad driver does that at start-up) then sleeps for ever in
++uinput_request_submit(), state D, and cannot be killed.  The effect: Apps > RetroArch (and
++every game launched through it) stays on the loading screen.
++
++What it changes
++---------------
++Eight 32-bit instructions inside trimui_setup_xpad:
++  * the seven `bl ioctl` calls that do UI_SET_EVBIT(EV_FF) and UI_SET_FFBIT(...) x6
++    become `nop`  (their return values are never checked);
++  * `mov w0,#16` (uinput_user_dev.ff_effects_max) becomes `mov w0,#0`.
++Nothing else in the file changes, so every newer input fix in the daemon is kept.
++
++Usage
++-----
++  inputd-disable-ff.py --check FILE            prints original | patched | unknown
++  inputd-disable-ff.py FILE -o OUT             writes the patched copy (FILE is not touched)
++  inputd-disable-ff.py FILE --in-place         patches FILE (a .orig copy is kept)
++
++Exit status: 0 on success (also when already patched), 1 when the file is not the build
++this script knows how to patch (nothing is written in that case).
++"""
++import argparse
++import hashlib
++import shutil
++import struct
++import sys
++
++NOP = 0xD503201F
++MOV_W0_0 = 0x52800000          # mov w0, #0
++MOV_W0_16 = 0x52800200         # mov w0, #0x10
++IOCTL_PLT = 0x4011A0           # ioctl@plt in the 41144-byte tsp/tsps build
++
++# Each call site: (address of the `bl ioctl`, address of `mov w2,#code`, w2 value,
++#                  address of `mov x1,#request` (low half; the high half 0x4004 follows)).
++#   UI_SET_EVBIT = 0x40045564 (w2 = EV_FF = 0x15), UI_SET_FFBIT = 0x4004556b (w2 = FF_*).
++CALL_SITES = (
++    (0x403C4C, 0x403C38, 0x15, 0x403C3C, 0x5564),
++    (0x403C60, 0x403C50, 0x50, 0x403C54, 0x556B),
++    (0x403C74, 0x403C64, 0x60, 0x403C68, 0x556B),
++    (0x403C88, 0x403C78, 0x51, 0x403C7C, 0x556B),
++    (0x403C9C, 0x403C8C, 0x58, 0x403C90, 0x556B),
++    (0x403CB0, 0x403CA0, 0x59, 0x403CA4, 0x556B),
++    (0x403CC4, 0x403CB4, 0x5A, 0x403CB8, 0x556B),
++)
++MOV_SITE = 0x403CC8            # mov w0,#16  (uinput_user_dev.ff_effects_max)
++
++
++def mov_w2(imm):
++    return 0x52800000 | (imm << 5) | 2
++
++
++def mov_x1(imm):
++    return 0xD2800000 | (imm << 5) | 1
++
++
++def load_segments(data):
++    if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
++        raise ValueError("not a 64-bit little-endian ELF file")
++    if struct.unpack_from("<H", data, 0x12)[0] != 0xB7:
++        raise ValueError("not an aarch64 ELF file")
++    phoff = struct.unpack_from("<Q", data, 0x20)[0]
++    phentsize, phnum = struct.unpack_from("<HH", data, 0x36)
++    segs = []
++    for i in range(phnum):
++        ptype, _flags, off, va, _pa, filesz, _memsz, _align = struct.unpack_from(
++            "<IIQQQQQQ", data, phoff + i * phentsize)
++        if ptype == 1:
++            segs.append((va, off, filesz))
++    return segs
++
++
++def file_offset(segs, va):
++    for seg_va, off, size in segs:
++        if seg_va <= va < seg_va + size:
++            return off + va - seg_va
++    raise ValueError("address %#x is not in a loadable segment" % va)
++
++
++def word(data, segs, va):
++    return struct.unpack_from("<I", data, file_offset(segs, va))[0]
++
++
++def bl_target(w, va):
++    if (w >> 26) != 0b100101:
++        return None
++    imm = w & 0x3FFFFFF
++    if imm & (1 << 25):
++        imm -= 1 << 26
++    return va + imm * 4
++
++
++def state(data):
++    """original | patched | unknown for the bytes of this file."""
++    try:
++        segs = load_segments(data)
++        calls = nops = 0
++        for bl_va, w2_va, w2_imm, x1_va, x1_imm in CALL_SITES:
++            # the surrounding instructions must be exactly the ones we expect, otherwise
++            # this is another build and the offsets mean nothing
++            if word(data, segs, w2_va) != mov_w2(w2_imm):
++                return "unknown"
++            if word(data, segs, x1_va) != mov_x1(x1_imm):
++                return "unknown"
++            w = word(data, segs, bl_va)
++            if bl_target(w, bl_va) == IOCTL_PLT:
++                calls += 1
++            elif w == NOP:
++                nops += 1
++            else:
++                return "unknown"
++        mov = word(data, segs, MOV_SITE)
++        if calls == len(CALL_SITES) and mov == MOV_W0_16:
++            return "original"
++        if nops == len(CALL_SITES) and mov == MOV_W0_0:
++            return "patched"
++        return "unknown"
++    except (ValueError, struct.error):
++        return "unknown"
++
++
++def patch(data):
++    segs = load_segments(data)
++    out = bytearray(data)
++    for bl_va, *_rest in CALL_SITES:
++        struct.pack_into("<I", out, file_offset(segs, bl_va), NOP)
++    struct.pack_into("<I", out, file_offset(segs, MOV_SITE), MOV_W0_0)
++    return bytes(out)
++
++
++def sha(data):
++    return hashlib.sha256(data).hexdigest()
++
++
++def main(argv=None):
++    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
++    ap.add_argument("file")
++    ap.add_argument("-o", "--output")
++    ap.add_argument("--in-place", action="store_true")
++    ap.add_argument("--check", action="store_true")
++    args = ap.parse_args(argv)
++
++    with open(args.file, "rb") as fh:
++        data = fh.read()
++    st = state(data)
++
++    if args.check:
++        print(st)
++        return 0 if st in ("original", "patched") else 1
++
++    if st == "unknown":
++        print("%s: not the tsp/tsps build this script knows (nothing written)" % args.file,
++              file=sys.stderr)
++        return 1
++
++    new = patch(data) if st == "original" else data
++    if args.in_place:
++        if st == "original":
++            shutil.copy2(args.file, args.file + ".orig")
++            with open(args.file, "wb") as fh:
++                fh.write(new)
++        target = args.file
++    elif args.output:
++        with open(args.output, "wb") as fh:
++            fh.write(new)
++        target = args.output
++    else:
++        ap.error("give -o OUT or --in-place")
++
++    print("%s: %s -> patched, %d bytes, sha256 %s" % (
++        target, st, len(new), sha(new)))
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/inputd_noff_test.sh b/tests/inputd_noff_test.sh
+new file mode 100644
+index 00000000..262c4eed
+--- /dev/null
++++ b/tests/inputd_noff_test.sh
+@@ -0,0 +1,109 @@
++#!/usr/bin/env bash
++# Off-device checks for the tsp/tsps input daemon that no longer advertises force feedback
++# (scripts/inputd-disable-ff.py and the daemons shipped on the card).
++# Usage: bash tests/inputd_noff_test.sh     Needs: python3. Optional: llvm-objdump, git, sha256sum.
++#
++# The daemon cannot be executed here (aarch64 build, needs /dev/uinput and the UART), so the
++# checks are structural: which bytes change, what the disassembly of the patched function
++# looks like, and that the files on the card are the patched build.
++
++ROOT=$(cd "$(dirname "$0")/.." && pwd)
++PATCHER=$ROOT/scripts/inputd-disable-ff.py
++T=$(mktemp -d)
++trap 'rm -rf "$T"' EXIT
++
++pass=0
++fail=0
++ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
++bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
++eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1  (got '$2', want '$3')"; fi; }
++
++command -v python3 >/dev/null 2>&1 || {
++    echo "python3 not found"
++    exit 1
++}
++
++# The pristine upstream build (JukaMix d5102fab) is the reference for the byte diff.  Inside a
++# clone it comes from git; otherwise the tests that need it are skipped.
++UP=$T/upstream_tsp_inputd
++have_up=0
++if git -C "$ROOT" show d5102fab:System/resources/tsp_inputd >"$UP" 2>/dev/null && [ -s "$UP" ]; then
++    have_up=1
++fi
++
++# ---- 1. what the script recognises -------------------------------------------------------
++if [ "$have_up" = 1 ]; then
++    eq "upstream tsp build is recognised as original" "$(python3 -I "$PATCHER" --check "$UP")" original
++    eq "upstream tsp build size" "$(wc -c <"$UP" | tr -d ' ')" 41144
++fi
++python3 -I "$PATCHER" --check "$ROOT/trimui/app/trimui_inputd" >/dev/null 2>&1
++st=$?
++# either the patched tsp build (this card) or the old 26912-byte build: never "original"
++out=$(python3 -I "$PATCHER" --check "$ROOT/trimui/app/trimui_inputd" 2>&1)
++case "$out" in
++    patched | unknown) ok "default daemon is not the unpatched tsp build ($out, status $st)" ;;
++    *) bad "default daemon is the unpatched tsp build" ;;
++esac
++head -c 4096 /dev/urandom >"$T/junk.bin"
++eq "random bytes are refused" "$(python3 -I "$PATCHER" --check "$T/junk.bin" 2>/dev/null)" unknown
++if python3 -I "$PATCHER" "$T/junk.bin" -o "$T/junk.out" 2>/dev/null; then bad "patcher accepted a foreign file"; else ok "patcher refuses a foreign file"; fi
++[ -e "$T/junk.out" ] && bad "patcher wrote output for a foreign file" || ok "nothing written for a foreign file"
++
++# ---- 2. the patch itself ------------------------------------------------------------------
++if [ "$have_up" = 1 ]; then
++    python3 -I "$PATCHER" "$UP" -o "$T/patched.bin" >/dev/null
++    eq "patched copy is recognised" "$(python3 -I "$PATCHER" --check "$T/patched.bin")" patched
++    eq "size is unchanged" "$(wc -c <"$T/patched.bin" | tr -d ' ')" "$(wc -c <"$UP" | tr -d ' ')"
++    python3 -I "$PATCHER" "$T/patched.bin" -o "$T/twice.bin" >/dev/null
++    cmp -s "$T/patched.bin" "$T/twice.bin" && ok "patching twice changes nothing" || bad "patching twice changed the file"
++    changed=$(python3 -I - "$UP" "$T/patched.bin" <<'PY'
++import sys
++a = open(sys.argv[1], 'rb').read()
++b = open(sys.argv[2], 'rb').read()
++words = sorted({i // 4 * 4 for i in range(len(a)) if a[i] != b[i]})
++print(len(words), ' '.join('%x' % w for w in words))
++PY
++)
++    eq "exactly eight 32-bit words differ, at the expected offsets" "$changed" "8 3c4c 3c60 3c74 3c88 3c9c 3cb0 3cc4 3cc8"
++    [ "$(cmp -l "$UP" "$T/patched.bin" | awk '$1 < 15437 || $1 > 15564' | wc -l)" = 0 ] \
++        && ok "no byte outside the 8 patched words changes (file offsets 0x3c4c-0x3ccb)" || bad "bytes changed outside the function"
++    cp "$UP" "$T/inplace.bin"
++    python3 -I "$PATCHER" "$T/inplace.bin" --in-place >/dev/null
++    cmp -s "$T/inplace.bin.orig" "$UP" && ok "--in-place keeps the original as .orig" || bad "--in-place lost the original"
++    cmp -s "$T/inplace.bin" "$T/patched.bin" && ok "--in-place result equals -o result" || bad "--in-place differs from -o"
++fi
++
++# ---- 3. disassembly of the patched function ------------------------------------------------
++SRC=$ROOT/System/resources/tsp_inputd
++if command -v llvm-objdump >/dev/null 2>&1; then
++    dis=$(llvm-objdump -d --no-show-raw-insn "$SRC" 2>/dev/null | sed -n '/^ *403c38:/,/^ *403cf0:/p')
++    n_nop=$(printf '%s\n' "$dis" | grep -cE '^ *403c(4c|60|74|88|9c|b0|c4):\s+nop')
++    eq "the seven FF ioctl calls are nops" "$n_nop" 7
++    printf '%s\n' "$dis" | grep -qE '^ *403cc8:\s+mov\s+w0, #0x0\b' && ok "ff_effects_max is set to 0" || bad "ff_effects_max is not 0"
++    # what must survive: the UI_DEV_SETUP (0x405c5503) and UI_DEV_CREATE (0x5501) calls
++    printf '%s\n' "$dis" | grep -qE '#0x5503' && printf '%s\n' "$dis" | grep -qE '#0x5501' \
++        && ok "UI_DEV_SETUP and UI_DEV_CREATE are still issued" || bad "device creation calls are missing"
++    # no ioctl at all between the EV_FF setup and UI_DEV_SETUP any more
++    between=$(printf '%s\n' "$dis" | sed -n '/^ *403c38:/,/^ *403cdc:/p' | grep -c 'bl.*ioctl')
++    eq "no ioctl left between the FF setup and UI_DEV_SETUP" "$between" 0
++    # nothing else in the whole daemon uploads or sets FF bits any more
++    ffbits=$(llvm-objdump -d --no-show-raw-insn "$SRC" 2>/dev/null | grep -A3 '#0x556b' | grep -c 'bl.*ioctl')
++    eq "no UI_SET_FFBIT request is followed by an ioctl anywhere" "$ffbits" 0
++else
++    echo "skip disassembly checks (llvm-objdump not found)"
++fi
++
++# ---- 4. what is shipped on the card ---------------------------------------------------------
++eq "tsp_inputd on the card is patched" "$(python3 -I "$PATCHER" --check "$SRC")" patched
++eq "tsps_inputd on the card is patched" "$(python3 -I "$PATCHER" --check "$ROOT/System/resources/tsps_inputd")" patched
++cmp -s "$SRC" "$ROOT/System/resources/tsps_inputd" && ok "tsp and tsps builds are the same file" || bad "tsp and tsps builds differ"
++cmp -s "$SRC" "$ROOT/trimui/app/trimui_inputd" && ok "the installed default daemon equals the patched tsp build" || bad "trimui/app/trimui_inputd is not the patched tsp build"
++if [ "$have_up" = 1 ]; then
++    # same function, same size, different bytes: the card must not still carry the original
++    cmp -s "$SRC" "$UP" && bad "tsp_inputd on the card is still the upstream build" || ok "tsp_inputd on the card differs from upstream"
++fi
++python3 -I -m py_compile "$PATCHER" 2>/dev/null && ok "patcher compiles" || bad "patcher does not compile"
++
++echo
++echo "$pass passed, $fail failed"
++[ "$fail" -eq 0 ]
+diff --git a/tests/ra_probe_test.sh b/tests/ra_probe_test.sh
+index d6894b59..caaa9edb 100755
+--- a/tests/ra_probe_test.sh
++++ b/tests/ra_probe_test.sh
+@@ -127,6 +127,75 @@ JUKAMIX_PROC=$P JUKAMIX_RA_PROBE_SECONDS=17 JUKAMIX_RA_PROBE_FIND_SECONDS=2 JUKA
+ has "flag: strace requested by System/etc/ra_strace" "$LOG" 'strace: attaching'
+ rm -f "$T/sd/System/etc/ra_strace"
+ 
++# ---- 6b. main thread blocked in a force-feedback upload (the field failure) -------------
++# aarch64 syscall 29 = ioctl, 0x40304580 = EVIOCSFF, fd 12 = a uinput-backed pad
++sed -i 's/ S 1 1 1/ D 1 1 1/' "$P/4321/task/4321/stat"
++printf 'uinput_request_submit.part.1' >"$P/4321/wchan"
++printf '29 0xc 0x40304580 0xb3761d0 0x435 0xb376200 0x0 0x7fec367830 0x7f9a26bd90\n' >"$P/4321/syscall"
++ln -s /dev/input/event3 "$P/4321/fd/12"
++ln -s /dev/input/event0 "$P/4321/fd/11"
++mkdir -p "$P/bus/input" "$P/2272/fd" "$T/sd/trimui/app" "$T/sd/System/resources"
++cat >"$P/bus/input/devices" <<'EOF'
++I: Bus=0019 Vendor=0001 Product=0001 Version=0100
++N: Name="axp2202-pek"
++H: Handlers=kbd event0
++B: EV=3
++
++I: Bus=0003 Vendor=045e Product=028e Version=0110
++N: Name="Microsoft X-Box 360 pad"
++P: Phys=
++H: Handlers=js0 event3
++B: EV=20000b
++B: FF=100040000 0
++EOF
++ln -s /dev/uinput "$P/2272/fd/5"
++printf 'trimui_inputd\n' >"$P/2272/comm"
++ln -s /mnt/SDCARD/trimui/app/trimui_inputd "$P/2272/exe"
++head -c 41144 /dev/zero >"$T/sd/trimui/app/trimui_inputd"
++head -c 26912 /dev/zero >"$T/sd/System/resources/tsp_inputd"
++: >"$LOG"
++JUKAMIX_PROC=$P JUKAMIX_RA_PROBE_SECONDS=6 JUKAMIX_RA_PROBE_FIND_SECONDS=2 JUKAMIX_STRACE=$T/fake_strace \
++    JUKAMIX_RA_PROBE_INTERVAL=2 sh "$PROBE" "$BIN"
++has "FF: says the thread waits in the uinput request" "$LOG" 'wchan=uinput_request_submit'
++has "FF: recognises EVIOCSFF and the fd" "$LOG" 'blocked in EVIOCSFF .* on fd 12'
++has "FF: resolves the fd to the event node" "$LOG" 'fd 12 -> /dev/input/event3'
++has "FF: names the pad behind that node" "$LOG" 'N: Name="Microsoft X-Box 360 pad"'
++has "FF: shows the pad advertises force feedback" "$LOG" 'B: FF=100040000'
++hasnt "FF: leaves out the unrelated device block" "$LOG" 'H: Handlers=kbd event0'
++has "FF: lists who holds /dev/uinput" "$LOG" 'pid 2272 \(trimui_inputd\) fd 5'
++has "FF: reports the installed daemon size" "$LOG" 'installed input daemon: 41144 bytes'
++has "FF: reports the shipped daemon size" "$LOG" 'resources/tsp_inputd: 26912 bytes'
++n=$(grep -c 'blocked in EVIOCSFF' "$LOG")
++if [ "$n" = 1 ]; then ok "FF: the input context is logged once, not every sample"; else bad "FF: input context logged $n times"; fi
++sed -i 's/ D 1 1 1/ S 1 1 1/' "$P/4321/task/4321/stat"
++printf 'io_schedule' >"$P/4321/wchan"
++printf '0 0x3 0x0\n' >"$P/4321/syscall"
++
++# ---- 6c. real time: a sleep that returns early must not shorten the probe ---------------
++# stub sleep: every odd call returns at once (the busybox-ash behaviour seen on the device),
++# every even call "sleeps" one second by moving the fake uptime forward
++mkdir -p "$T/bin"
++printf '100.00 200.00\n' >"$P/uptime"
++: >"$T/sleep_calls"
++cat >"$T/bin/sleep" <<EOF2
++#!/bin/sh
++echo "\$1" >>"$T/sleep_calls"
++n=\$(wc -l <"$T/sleep_calls")
++if [ \$((n % 2)) -eq 0 ]; then
++    read -r up rest <"$P/uptime"
++    printf '%s.00 %s\n' \$((\${up%%.*} + 1)) "\$rest" >"$P/uptime"
++fi
++EOF2
++chmod +x "$T/bin/sleep"
++: >"$LOG"
++PATH=$T/bin:$PATH JUKAMIX_PROC=$P JUKAMIX_RA_PROBE_SECONDS=6 JUKAMIX_RA_PROBE_FIND_SECONDS=2 \
++    JUKAMIX_STRACE=$T/none JUKAMIX_RA_PROBE_INTERVAL=3 sh "$PROBE" "$BIN"
++has "time: first sample at +0 s" "$LOG" '^-- t=\+0s .*uptime=100'
++has "time: second sample after 3 real seconds" "$LOG" '^-- t=\+3s .*uptime=103'
++has "time: ends after 6 real seconds" "$LOG" 'probe finished after 6s'
++calls=$(wc -l <"$T/sleep_calls")
++if [ "$calls" -ge 12 ]; then ok "time: retried the early-returning sleep ($calls calls for 6 s)"; else bad "time: only $calls sleep calls"; fi
++
+ # ---- 7. the launcher hooks the probe in and stays valid POSIX sh --------------------------
+ grep -q 'ra_probe.sh' "$ROOT/Apps/RetroArch/launch.sh" && ok "launch.sh starts the probe" || bad "launch.sh does not start the probe"
+ last=$(tail -n 1 "$ROOT/Apps/RetroArch/launch.sh")
+diff --git a/trimui/app/trimui_inputd b/trimui/app/trimui_inputd
+index b1edea690c7bcbef3c8d91d03b2bbf37bbdbf9d4..7e44c3343c4651bebc059678f8bbb73320c838e3 100644
+GIT binary patch
+literal 41144
+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
+D{%W`l
+
+literal 26912
+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
+
