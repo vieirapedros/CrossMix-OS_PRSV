@@ -1,0 +1,550 @@
+From 5eaee979b916d81772f40b90487d2d53089bf68a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 24 Nov 2026 08:25:18 -0300
+Subject: [PATCH] RomM Library: add "Delete from the SD card" to the game
+ screen
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Requested: when a downloaded ROM is broken or does not work, it could not be removed from the
+RomM menu.
+
+- game screen: "Excluir do cartão SD" appears when the game is on the card; confirmation (A/B)
+  that shows up to 3 names, the count of the rest and the total size, and says saves and save
+  states are NOT deleted. Menu numbering adapts; without the game on the card nothing changes.
+- every successful download now writes Data/romm/dl/<id>.lst ("folder<TAB>item"), also for
+  multi-file games (ZIP extracted; each moved item is recorded, partial extractions included), so
+  only what the app downloaded is deleted.
+- single-file games downloaded before the lists existed are recognised by path.
+- safety: empty/./../slash-containing names are never deleted, an item listed by another game is
+  kept, nothing outside Roms/ is touched; also removes that game's .rommpart/.state and the
+  folder's *_cache*.db so it disappears from the emulator list.
+- game list marks multi-file games already on the card with "* " too.
+- tests: 124 -> 159 checks (single, multi-file, cancel, legacy, shared item, dangerous list
+  entries, saves untouched). README and docs/HISTORICO-2026-11-22.md (section 11) updated.
+
+Only simulated here (dash, mawk); not run on the device.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RhMAqBm84PVkwcVFZvG6f2
+---
+ Apps/RomMLibrary/README.md       |   5 +-
+ Apps/RomMLibrary/lib/common.sh   |   2 +
+ Apps/RomMLibrary/lib/download.sh | 123 +++++++++++++++++++++++++++++++
+ Apps/RomMLibrary/lib/i18n.sh     |  14 ++++
+ Apps/RomMLibrary/lib/screens.sh  |  47 +++++++-----
+ README.md                        |   2 +-
+ docs/HISTORICO-2026-11-22.md     |  32 +++++++-
+ tests/romm_library/run.sh        | 102 +++++++++++++++++++++++++
+ 8 files changed, 307 insertions(+), 20 deletions(-)
+
+diff --git a/Apps/RomMLibrary/README.md b/Apps/RomMLibrary/README.md
+index a3ccaee4..25a2607d 100644
+--- a/Apps/RomMLibrary/README.md
++++ b/Apps/RomMLibrary/README.md
+@@ -20,9 +20,10 @@ Dentro do Tailscale o tráfego já é criptografado; `http://` é o jeito mais s
+ 
+ - **Explorar plataformas** → escolha a plataforma → lista paginada (A–Z). No topo: `[ Buscar... ]` (dentro da plataforma) e `[ Ir para a letra... ]`.
+ - **Buscar jogo** no menu principal procura em todas as plataformas.
+-- `* ` na frente do nome = o arquivo já está no cartão.
++- `* ` na frente do nome = o jogo já está no cartão.
+ - Escolha o jogo → **Baixar para o cartão SD**. Aparece o progresso; **B para** e o download pode ser **retomado** depois (basta baixar de novo).
+ - Terminando, o app apaga o cache da lista da pasta (`*_cache*.db`); se o jogo não aparecer, reinicie o MainUI.
++- **Excluir do cartão SD**: na tela de um jogo que já está no cartão aparece essa opção (útil para ROM quebrada ou que não abre). Pede confirmação (A: sim, B: não) e mostra o que será apagado. Só apaga o que o app baixou; **saves e estados de jogo não são apagados**. Também limpa restos de download desse jogo e o cache da lista (`*_cache*.db`), para ele sumir da lista do emulador.
+ 
+ ### Para qual pasta vai?
+ 
+@@ -34,6 +35,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra
+ 
+ | O quê | Onde |
+ |---|---|
++| Lista de arquivos de cada jogo baixado | `Data/romm/dl/<id>.lst` (linhas `pasta<TAB>item`); é o que a opção Excluir usa |
+ | Config (URL, login, token, pastas lembradas) | `Data/romm/config.json` — **texto puro, não versione** (já está no `.gitignore`) |
+ | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
+ | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
+@@ -49,6 +51,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
+ | "Não consegui conectar" | Servidor desligado, porta errada, ou Tailscale parado (o app avisa o estado do Tailscale). |
+ | "Login recusado" | Usuário/senha ou token errados. O app tenta também o login OAuth caso o Basic seja recusado. |
+ | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
++| Jogo baixado não aparece com "Excluir" | O app só sabe excluir o que baixou: cada download grava a lista de arquivos em `Data/romm/dl/<id>.lst`. Jogos de **arquivo único** baixados antes dessa lista existir são reconhecidos pelo nome; jogos de **vários arquivos** (ZIP) baixados antes dela não: baixe-o de novo uma vez (sobrescreve) e a opção passa a aparecer. |
+ | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
+ | Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
+ 
+diff --git a/Apps/RomMLibrary/lib/common.sh b/Apps/RomMLibrary/lib/common.sh
+index deae5a43..7f5158df 100755
+--- a/Apps/RomMLibrary/lib/common.sh
++++ b/Apps/RomMLibrary/lib/common.sh
+@@ -5,6 +5,7 @@
+ NL='
+ '
+ US=$(printf '\037')
++TAB=$(printf '\t')
+ 
+ SDCARD=${ROMM_SDCARD:-/mnt/SDCARD}
+ BIN_DIR="$SDCARD/System/bin"
+@@ -12,6 +13,7 @@ SCRIPTS_DIR="$SDCARD/System/usr/trimui/scripts"
+ ROMS_DIR="$SDCARD/Roms"
+ LOGS_DIR="$SDCARD/System/logs"
+ DATA_DIR="$SDCARD/Data/romm"
++DL_DIR="$DATA_DIR/dl"   # lista dos arquivos de cada jogo baixado (<id>.lst), usada para excluir
+ CFG="$DATA_DIR/config.json"
+ LOG="$LOGS_DIR/romm_library.log"
+ TS_BIN="$BIN_DIR/tailscale"
+diff --git a/Apps/RomMLibrary/lib/download.sh b/Apps/RomMLibrary/lib/download.sh
+index 317b8ad5..fed17e93 100755
+--- a/Apps/RomMLibrary/lib/download.sh
++++ b/Apps/RomMLibrary/lib/download.sh
+@@ -80,6 +80,7 @@ dl_move_into() { # origem destino: move tudo (inclusive ocultos), sobrescrevendo
+     _mv_t="$2/$(basename "$_mv_f")"
+     [ -d "$_mv_f" ] && [ -d "$_mv_t" ] && rm -rf "$_mv_t"
+     mv -f "$_mv_f" "$2/" || return 1
++    dl_note_item "$(basename "$_mv_f")"
+   done
+   return 0
+ }
+@@ -104,6 +105,7 @@ dl_extract() { # zip pasta-destino pasta-rom id [nome-final-se-arquivo-unico]
+   # arquivo unico entregue dentro de um ZIP (rota /api/roms/download): grava com o nome ja sanitizado
+   if [ -n "$5" ] && [ "$_ex_n" = 1 ] && [ -f "$_ex_one" ]; then
+     mv -f "$_ex_one" "$2/$5" || { rm -rf "$_ex_tmp"; return 1; }
++    dl_note_item "$5"
+     rm -rf "$_ex_tmp"
+     return 0
+   fi
+@@ -230,11 +232,14 @@ rom_download() {
+   fi
+ 
+   # ---- sucesso no curl: confere, move/extrai, limpa
++  mkdir -p "$TMPD" 2>/dev/null
++  : >"$TMPD/dl_items"
+   if [ "$_kind" = zip ]; then
+     ui_info "$L_DL_EXTRACT"
+     _single=""
+     [ "$_multi" = 1 ] || _single=$_clean
+     if ! dl_extract "$_part" "$_dir" "$_folder" "$_id" "$_single"; then
++      dl_manifest_write "$_id" "$_folder"   # o que chegou a ser movido ainda pode ser excluido pelo menu
+       rm -f "$_part" "$_state"
+       DL_MSG="$L_DL_EXTRACT_FAIL"
+       return 1
+@@ -252,8 +257,10 @@ rom_download() {
+       return 1
+     fi
+     mv -f "$_part" "$_dir/$_clean" || { DL_MSG="$L_DL_FAILED"; return 1; }
++    dl_note_item "$_clean"
+     _shown="$_clean"
+   fi
++  dl_manifest_write "$_id" "$_folder"
+   rm -f "$_state"
+   rm -f "$_dir"/*_cache*.db 2>/dev/null
+   sync
+@@ -263,6 +270,122 @@ rom_download() {
+   return 0
+ }
+ 
++# ---------------------------------------------------------------- o que foi baixado (para excluir pelo menu)
++# Cada download bem-sucedido grava Data/romm/dl/<id>.lst com linhas "pasta<TAB>item" (item = arquivo ou
++# pasta direto dentro de Roms/<pasta>/).  Excluir so apaga o que esta nessa lista; jogos de arquivo unico
++# baixados antes dessa lista existir sao reconhecidos pelo caminho (pasta + nome do arquivo no RomM).
++dl_note_item() { printf '%s\n' "$1" >>"$TMPD/dl_items" 2>/dev/null; }
++
++dl_manifest_write() { # id pasta: junta $TMPD/dl_items ao manifesto do jogo (troca as linhas da mesma pasta)
++  [ -s "$TMPD/dl_items" ] || return 0
++  mkdir -p "$DL_DIR" 2>/dev/null || return 0
++  _mw="$DL_DIR/$1.lst"
++  {
++    [ -f "$_mw" ] && awk -F'\t' -v f="$2" '$1 != f' "$_mw"
++    awk -v f="$2" '{ print f "\t" $0 }' "$TMPD/dl_items"
++  } >"$_mw.new" 2>/dev/null && mv -f "$_mw.new" "$_mw"
++  return 0
++}
++
++dl_safe_name() { # nome simples: nao vazio, sem barra, sem quebra de linha, nem . nem ..
++  case "$1" in '' | . | .. | */* | *"$NL"*) return 1 ;; esac
++  return 0
++}
++
++rom_inst_items() { # id pasta fs multi -> linhas "pasta<TAB>item" que existem no cartao
++  _ii_l="$DL_DIR/$1.lst"
++  _ii_any=""
++  if [ -f "$_ii_l" ]; then
++    while IFS=$TAB read -r _ii_f _ii_i; do
++      dl_safe_name "$_ii_f" && dl_safe_name "$_ii_i" || continue
++      [ -e "$ROMS_DIR/$_ii_f/$_ii_i" ] || continue
++      printf '%s\t%s\n' "$_ii_f" "$_ii_i"
++      _ii_any=1
++    done <"$_ii_l"
++  fi
++  [ -n "$_ii_any" ] && return 0
++  # sem lista (baixado por uma versao anterior): so jogos de arquivo unico, pelo caminho
++  if [ -n "$2" ] && [ "$4" != 1 ] && [ "$3" != - ] && [ -n "$3" ]; then
++    _ii_n=$(dl_sanitize "$3")
++    [ -f "$ROMS_DIR/$2/$_ii_n" ] && printf '%s\t%s\n' "$2" "$_ii_n"
++  fi
++  return 0
++}
++
++dl_item_shared() { # id pasta item -> 0 se a lista de OUTRO jogo tambem tem esse item (nao apagar)
++  for _sh_f in "$DL_DIR"/*.lst; do
++    [ -f "$_sh_f" ] || continue
++    [ "$_sh_f" = "$DL_DIR/$1.lst" ] && continue
++    grep -Fxq "$2$TAB$3" "$_sh_f" 2>/dev/null && return 0
++  done
++  return 1
++}
++
++rom_del_summary() { # id pasta fs multi -> ate 3 nomes, "+N a mais" e o tamanho total
++  mkdir -p "$TMPD" 2>/dev/null
++  rom_inst_items "$1" "$2" "$3" "$4" >"$TMPD/del_items"
++  _ds_n=0
++  _ds_kb=0
++  _ds_out=""
++  while IFS=$TAB read -r _ds_f _ds_i; do
++    _ds_n=$((_ds_n + 1))
++    [ "$_ds_n" -le 3 ] && _ds_out="$_ds_out$_ds_i$NL"
++    _ds_k=$(du -sk "$ROMS_DIR/$_ds_f/$_ds_i" 2>/dev/null | awk '{ print $1; exit }')
++    case "$_ds_k" in '' | *[!0-9]*) _ds_k=0 ;; esac
++    _ds_kb=$((_ds_kb + _ds_k))
++  done <"$TMPD/del_items"
++  [ "$_ds_n" -gt 3 ] && _ds_out="$_ds_out+$((_ds_n - 3)) $L_DEL_MORE$NL"
++  printf '%s%s' "$_ds_out" "$(fmt_size $((_ds_kb * 1024)))"
++}
++
++rom_delete_do() { # id pasta fs multi -> apaga so o que o app baixou; DEL_MSG = resultado; retorna 0 se tudo certo
++  DEL_MSG=""
++  mkdir -p "$TMPD" 2>/dev/null
++  rom_inst_items "$1" "$2" "$3" "$4" >"$TMPD/del_items"
++  if [ ! -s "$TMPD/del_items" ]; then
++    DEL_MSG="$L_DEL_NONE"
++    return 1
++  fi
++  _rd_ok=0
++  _rd_fail=0
++  : >"$TMPD/del_dirs"
++  while IFS=$TAB read -r _rd_f _rd_i; do
++    dl_safe_name "$_rd_f" && dl_safe_name "$_rd_i" || continue
++    if dl_item_shared "$1" "$_rd_f" "$_rd_i"; then
++      log "excluir id=$1: mantido (outro jogo usa) Roms/$_rd_f/$_rd_i"
++      continue
++    fi
++    rm -rf -- "${ROMS_DIR:?}/${_rd_f:?}/${_rd_i:?}" 2>/dev/null
++    if [ -e "$ROMS_DIR/$_rd_f/$_rd_i" ]; then
++      _rd_fail=$((_rd_fail + 1))
++      log "excluir id=$1: FALHOU Roms/$_rd_f/$_rd_i"
++    else
++      _rd_ok=$((_rd_ok + 1))
++      log "excluir id=$1: apagado Roms/$_rd_f/$_rd_i"
++    fi
++    printf '%s\n' "$_rd_f" >>"$TMPD/del_dirs"
++  done <"$TMPD/del_items"
++  [ -n "$2" ] && dl_safe_name "$2" && printf '%s\n' "$2" >>"$TMPD/del_dirs"
++  # restos de download deste jogo e cache da lista do emulador (para o jogo sumir da lista)
++  _rd_clean=""
++  [ "$3" != - ] && [ -n "$3" ] && _rd_clean=$(dl_sanitize "$3")
++  sort -u "$TMPD/del_dirs" >"$TMPD/del_dirs.u" 2>/dev/null
++  while IFS= read -r _rd_d; do
++    [ -d "$ROMS_DIR/$_rd_d" ] || continue
++    rm -f "$ROMS_DIR/$_rd_d/.romm_$1.state" 2>/dev/null
++    if [ -n "$_rd_clean" ]; then rm -f "$ROMS_DIR/$_rd_d/$_rd_clean.rommpart" "$ROMS_DIR/$_rd_d/$_rd_clean.zip.rommpart" 2>/dev/null; fi
++    rm -f "$ROMS_DIR/$_rd_d"/*_cache*.db 2>/dev/null
++  done <"$TMPD/del_dirs.u"
++  sync
++  if [ "$_rd_fail" -gt 0 ]; then
++    DEL_MSG="$L_DEL_FAIL"
++    return 1
++  fi
++  rm -f "$DL_DIR/$1.lst" 2>/dev/null
++  DEL_MSG="$L_DEL_OK"
++  return 0
++}
++
+ dl_clean_parts() { # apaga restos de downloads incompletos; imprime quantos
+   _cp_n=0
+   for _cp_d in "$ROMS_DIR"/*; do
+diff --git a/Apps/RomMLibrary/lib/i18n.sh b/Apps/RomMLibrary/lib/i18n.sh
+index f38ce00b..e84cd6f5 100755
+--- a/Apps/RomMLibrary/lib/i18n.sh
++++ b/Apps/RomMLibrary/lib/i18n.sh
+@@ -30,6 +30,13 @@ lang_load() {
+     L_DL_AGAIN="Download again (already on the SD card)"
+     L_DL_FOLDER="Choose another destination folder"
+     L_DL_BACK="Back"
++    L_DL_DELETE="Delete from the SD card"
++    L_DEL_ASK="Delete this game from the SD card?"
++    L_DEL_SAVES="Saves and save states are NOT deleted."
++    L_DEL_MORE="more"
++    L_DEL_OK="Deleted from the SD card:"
++    L_DEL_NONE="No files of this game were found on the SD card."
++    L_DEL_FAIL="Could not delete everything (files in use or read-only card). Details in the log."
+     L_DEST="Destination"
+     L_ASK_FOLDER="Which SD card folder should hold games from this platform?\n(B: cancel)"
+     L_NO_FOLDER="No destination folder chosen. Nothing was downloaded."
+@@ -113,6 +120,13 @@ lang_load() {
+     L_DL_AGAIN="Baixar de novo (já está no cartão)"
+     L_DL_FOLDER="Escolher outra pasta de destino"
+     L_DL_BACK="Voltar"
++    L_DL_DELETE="Excluir do cartão SD"
++    L_DEL_ASK="Excluir este jogo do cartão SD?"
++    L_DEL_SAVES="Saves e estados de jogo NÃO são apagados."
++    L_DEL_MORE="a mais"
++    L_DEL_OK="Excluído do cartão SD:"
++    L_DEL_NONE="Não encontrei arquivos deste jogo no cartão."
++    L_DEL_FAIL="Não consegui apagar tudo (arquivos em uso ou cartão protegido). Detalhes no log."
+     L_DEST="Destino"
+     L_ASK_FOLDER="Em qual pasta do cartão ficam os jogos desta plataforma?\n(B: cancelar)"
+     L_NO_FOLDER="Nenhuma pasta escolhida. Nada foi baixado."
+diff --git a/Apps/RomMLibrary/lib/screens.sh b/Apps/RomMLibrary/lib/screens.sh
+index 1832a8b4..c2e4611c 100755
+--- a/Apps/RomMLibrary/lib/screens.sh
++++ b/Apps/RomMLibrary/lib/screens.sh
+@@ -24,20 +24,30 @@ screen_game() { # usa R_*
+   _sg_pname=$R_PNAME
+   [ -n "$_sg_pname" ] || _sg_pname=$(plat_name_by_id "$R_PID")
+   while :; do
++    # "ja esta no cartao": pela lista gravada no download, ou (jogo de arquivo unico baixado antes) pelo caminho
+     _sg_ex=""
+-    if [ -n "$_sg_folder" ] && [ "$R_MULTI" != 1 ] && [ "$R_FS" != - ] &&
+-      [ -f "$ROMS_DIR/$_sg_folder/$(dl_sanitize "$R_FS")" ]; then
+-      _sg_ex=1
+-    fi
++    [ -n "$(rom_inst_items "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")" ] && _sg_ex=1
+     _sg_l2=$_sg_pname
+     [ "$R_SIZE" != 0 ] && _sg_l2="${_sg_l2:+$_sg_l2  -  }$(fmt_size "$R_SIZE")"
+     [ -n "$R_REG" ] && _sg_l2="${_sg_l2:+$_sg_l2  -  }$R_REG"
+     if [ -n "$_sg_folder" ]; then _sg_dest="Roms/$_sg_folder"; else _sg_dest="?"; fi
+     if [ -n "$_sg_ex" ]; then _sg_dl="$L_DL_AGAIN"; else _sg_dl="$L_DL"; fi
+-    _sg_c=$(ui_choose "$R_NAME${NL}$_sg_l2${NL}$L_DEST: $_sg_dest" \
+-      "1. $_sg_dl" "2. $L_DL_FOLDER" "3. $L_DL_BACK")
+-    case "$(choice_num "$_sg_c")" in
+-    1)
++    # menu numerado; "Excluir" so aparece quando o jogo esta no cartao
++    set -- "1. $_sg_dl"
++    _sg_n=2
++    _sg_ndel=0
++    if [ -n "$_sg_ex" ]; then
++      set -- "$@" "$_sg_n. $L_DL_DELETE"
++      _sg_ndel=$_sg_n
++      _sg_n=$((_sg_n + 1))
++    fi
++    set -- "$@" "$_sg_n. $L_DL_FOLDER"
++    _sg_nfld=$_sg_n
++    _sg_n=$((_sg_n + 1))
++    set -- "$@" "$_sg_n. $L_DL_BACK"
++    _sg_c=$(ui_choose "$R_NAME${NL}$_sg_l2${NL}$L_DEST: $_sg_dest" "$@")
++    _sg_k=$(choice_num "$_sg_c")
++    if [ "$_sg_k" = 1 ]; then
+       if [ -z "$_sg_folder" ]; then
+         _sg_folder=$(plat_ask_folder "$R_PID" "$R_PSLUG" "$R_PFS")
+         if [ -z "$_sg_folder" ]; then
+@@ -49,13 +59,18 @@ screen_game() { # usa R_*
+       _sg_rc=$?
+       ui_notice "$DL_MSG"
+       [ "$_sg_rc" = 0 ] && return 0
+-      ;;
+-    2)
++    elif [ "$_sg_ndel" != 0 ] && [ "$_sg_k" = "$_sg_ndel" ]; then
++      _sg_sum=$(rom_del_summary "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")
++      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES"; then
++        rom_delete_do "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI"
++        ui_notice "$DEL_MSG${NL}$R_NAME"
++      fi
++    elif [ "$_sg_k" = "$_sg_nfld" ]; then
+       _sg_nf=$(plat_ask_folder "$R_PID" "$R_PSLUG" "$R_PFS")
+       [ -n "$_sg_nf" ] && _sg_folder=$_sg_nf
+-      ;;
+-    *) return 0 ;;
+-    esac
++    else
++      return 0
++    fi
+   done
+ }
+ 
+@@ -104,10 +119,8 @@ screen_games() { # platform_id nome slug fs_slug busca
+       else
+         _gmf=$_gfolder
+       fi
+-      if [ -n "$_gmf" ] && [ "$_e" != 1 ] && [ "$_d" != - ] &&
+-        [ -f "$ROMS_DIR/$_gmf/$(dl_sanitize "$_d")" ]; then
+-        _gl="* $_gl"
+-      fi
++      # "* " = ja esta no cartao (pela lista gravada no download, ou pelo caminho nos jogos de arquivo unico antigos)
++      [ -n "$(rom_inst_items "$_a" "$_gmf" "$_d" "$_e")" ] && _gl="* $_gl"
+       set -- "$@" "$_gn. $_gl"
+     done <"$TMPD/page.tsv"
+     [ "$_goff" -gt 0 ] && set -- "$@" "$L_PREV"
+diff --git a/README.md b/README.md
+index 1e4ff7f8..ff1000f1 100644
+--- a/README.md
++++ b/README.md
+@@ -31,7 +31,7 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
+ | **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
+ | **Correção do travamento do RetroArch** | `trimui/app/trimui_inputd`, `System/resources/tsp_inputd`/`tsps_inputd`, `scripts/inputd-disable-ff.py` | O RetroArch travava no "loading" porque o daemon de entrada do TSP anuncia vibração (force feedback) mas nunca responde ao pedido do SDL. O patch troca 8 instruções para o controle virtual deixar de anunciar FF; o resto do daemon fica igual. Detalhes e limites: seção 8 do registro histórico |
+ | **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S e, se travar em vibração, qual dispositivo e quem segura `/dev/uinput`). Não altera o comportamento do RetroArch |
+-| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (124 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
++| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (159 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
+ | **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
+ 
+ **Instalar este fork no cartão:**
+diff --git a/docs/HISTORICO-2026-11-22.md b/docs/HISTORICO-2026-11-22.md
+index 26ca0e9e..4ae9b26f 100644
+--- a/docs/HISTORICO-2026-11-22.md
++++ b/docs/HISTORICO-2026-11-22.md
+@@ -95,7 +95,7 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir
+ 
+ ## 7. Limitações e pendências
+ 
+-- **Nada foi testado em hardware real.** Os testes são simulações (124 + 35 + 44 + 24 + 8 checagens); o
++- **Nada foi testado em hardware real.** Os testes são simulações (159 + 35 + 44 + 24 + 8 checagens); o
+   daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
+ - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
+   causa identificada, correção entregue e **confirmada no aparelho pelo usuário em 2026-11-23**
+@@ -300,3 +300,33 @@ checagens de ponta a ponta falham (provado com o código antigo).
+ **Limites:** os escapes são convertidos com `printf %b` e `tr` do BusyBox, o awk é o do BusyBox; só
+ rodei com `dash` e `mawk`. A estimativa de largura é conservadora, não exata. Se ainda aparecer algo
+ estranho, uma foto da tela mostra se o problema restante é de largura, de fonte ou de outro texto.
++
++## 11. RomM Library: opção "Excluir do cartão SD" (2026-11-24)
++
++**Pedido do usuário:** às vezes a ROM baixada não funciona ou está quebrada, e não dava para apagá-la
++pelo menu do RomM.
++
++**O que foi feito** (`lib/download.sh`, `lib/screens.sh`, `lib/i18n.sh`):
++
++- Tela do jogo: quando ele está no cartão, o menu ganha "Excluir do cartão SD" (a numeração se ajusta;
++  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (A: sim, B: não) mostrando até 3
++  nomes, quantos itens a mais e o tamanho total, e avisa que saves e estados **não** são apagados.
++- Para só apagar o que o app baixou, cada download passa a gravar `Data/romm/dl/<id>.lst` (linhas
++  `pasta<TAB>item`, item = arquivo ou pasta direto dentro de `Roms/<pasta>/`). Vale também para jogos
++  de vários arquivos: o ZIP é extraído e cada item movido é anotado. Se a extração falhar no meio, o que
++  já foi movido também fica na lista.
++- Jogos de arquivo único baixados antes da lista existir são reconhecidos pelo caminho
++  (`Roms/<pasta>/<nome sanitizado>`). Jogos de vários arquivos baixados antes não têm como ser
++  reconhecidos com segurança: é preciso baixar de novo uma vez.
++- Segurança: item ou pasta vazio, `.`, `..` ou com `/` nunca é apagado; um item que a lista de **outro**
++  jogo também cita é mantido; nada fora de `Roms/` é tocado. Também apaga o `.rommpart`/`.state` desse
++  jogo e o `*_cache*.db` da pasta.
++- A lista de jogos agora marca com `* ` também os jogos de vários arquivos já baixados (antes só os de
++  arquivo único).
++
++**Testes:** `tests/romm_library/run.sh` foi de 124 para 159 checagens (exclusão de arquivo único, de
++vários arquivos, cancelamento com B, jogo antigo sem lista, item compartilhado, entradas perigosas
++na lista, saves e outro jogo na mesma pasta intactos).
++
++**Limites:** testado só em simulação (`dash`, `mawk`, `du`/`sort` do ambiente de teste), não no
++aparelho. Não apaga imagens/metadados que o scraper do JukaMix tenha gerado para o jogo.
+diff --git a/tests/romm_library/run.sh b/tests/romm_library/run.sh
+index 4ff34357..02d233da 100755
+--- a/tests/romm_library/run.sh
++++ b/tests/romm_library/run.sh
+@@ -313,6 +313,108 @@ if scenario "e2e-multifile-ps1"; then
+   end_scenario
+ fi
+ 
++# ---- excluir jogo baixado (menu do jogo) ------------------------------------------------------
++if scenario "unit-delete"; then
++  new_sd
++  R=$SD/Roms/GBA; L=$SD/Data/romm/dl
++  mkdir -p "$R/Disc Dir" "$L" "$SD/Saves" "$TMP/fora"
++  printf x >"$R/a.gba"; printf x >"$R/shared.bin"; printf x >"$R/b.gba"; printf x >"$R/Disc Dir/f.bin"
++  printf x >"$R/GBA_cache1.db"; printf s >"$SD/Saves/keep.sav"; printf x >"$TMP/fora/evil"
++  printf 'GBA\ta.gba\nGBA\tshared.bin\nGBA\tDisc Dir\nGBA\tsumiu.gba\n' >"$L/10.lst"
++  printf 'GBA\tb.gba\nGBA\tshared.bin\n' >"$L/11.lst"
++  eq "rom_inst_items: so o que existe no cartao" "$(SH 'rom_inst_items 10 GBA - 1 | wc -l | tr -d " "')" "3"
++  eq "rom_inst_items: jogo sem lista e sem arquivo" "$(SH 'rom_inst_items 99 GBA nada.gba 0 | wc -l | tr -d " "')" "0"
++  eq "rom_del_summary: nomes e +N" "$(SH 'rom_del_summary 10 GBA - 1' | sed -n '1,3p' | tr '\n' '|')" "a.gba|shared.bin|Disc Dir|"
++  SH 'rom_delete_do 10 GBA - 1'; rc=$?
++  eq "rom_delete_do devolve 0" "$rc" "0"
++  check "apagou o arquivo da lista" test ! -e "$R/a.gba"
++  check "apagou a pasta da lista (com o conteudo)" test ! -e "$R/Disc Dir"
++  check "manteve item usado por OUTRO jogo" test -f "$R/shared.bin"
++  check "nao tocou no arquivo de outro jogo" test -f "$R/b.gba"
++  check "limpou o cache da lista do emulador" test ! -e "$R/GBA_cache1.db"
++  check "saves intactos" test -f "$SD/Saves/keep.sav"
++  check "lista do jogo removida" test ! -e "$L/10.lst"
++  check "lista do outro jogo intacta" test -f "$L/11.lst"
++  # seguranca: itens perigosos na lista nunca sao apagados
++  printf 'GBA\t../../fora/evil\nGBA\t..\n..\tb.gba\nGBA\t.\nGBA\t\n\tb.gba\nGBA\ta/b\n' >"$L/12.lst"
++  eq "itens perigosos nem sao listados" "$(SH 'rom_inst_items 12 GBA - 1 | wc -l | tr -d " "')" "0"
++  SH 'rom_delete_do 12 GBA - 1' >/dev/null; rc=$?
++  eq "rom_delete_do sem nada valido devolve 1" "$rc" "1"
++  check "arquivo fora de Roms/ intacto" test -f "$TMP/fora/evil"
++  check "Roms/GBA e b.gba intactos" test -f "$R/b.gba"
++  # jogo de arquivo unico baixado antes das listas: reconhecido pelo caminho
++  printf x >"$R/Velho_ Jogo.gba"
++  eq "legado: reconhece pelo caminho" "$(SH 'rom_inst_items 77 GBA "Velho: Jogo.gba" 0')" "$(printf 'GBA\tVelho_ Jogo.gba')"
++  eq "legado: multi-arquivo sem lista nao e reconhecido" "$(SH 'rom_inst_items 77 GBA "Velho: Jogo.gba" 1 | wc -l | tr -d " "')" "0"
++  SH 'rom_delete_do 77 GBA "Velho: Jogo.gba" 0' >/dev/null; rc=$?
++  eq "legado: exclui" "$rc:$(test -e "$R/Velho_ Jogo.gba" && echo ainda || echo sumiu)" "0:sumiu"
++  # sobras de download deste jogo tambem somem
++  printf x >"$R/Outro.gba"; printf x >"$R/Outro.gba.rommpart"; printf 1 >"$R/.romm_55.state"
++  printf 'GBA\tOutro.gba\n' >"$L/55.lst"
++  SH 'rom_delete_do 55 GBA "Outro.gba" 0' >/dev/null
++  check "apagou .rommpart e .state do jogo" sh -c "[ ! -e '$R/Outro.gba.rommpart' ] && [ ! -e '$R/.romm_55.state' ]"
++  end_scenario
++fi
++
++if scenario "e2e-delete-single"; then
++  start_server; new_sd; cfg_token
++  mkdir -p "$SD/Saves/GBA"; printf s >"$SD/Saves/GBA/keep.sav"
++  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
++    "contains:Advançe" "contains:Excluir"
++  run_app
++  f="$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
++  check "jogo foi baixado e excluido" test ! -e "$f"
++  check "lista de arquivos foi removida" sh -c "! ls '$SD/Data/romm/dl' 2>/dev/null | grep -q lst"
++  check "saves intactos" test -f "$SD/Saves/GBA/keep.sav"
++  eq "Excluir so aparece com o jogo no cartao (1 menu de 3)" "$(grep -c '^  | .*Excluir do cartão SD' "$M/sel.log")" "1"
++  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/info.log"
++  check "mostrou o resultado" grep -q "Excluído do cartão SD" "$M/info.log"
++  check "log registra o que apagou" grep -q "excluir id=.*apagado Roms/GBA/Adv" "$APPLOG"
++  end_scenario
++fi
++
++if scenario "e2e-delete-cancel"; then
++  start_server; new_sd; cfg_token
++  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
++    "contains:Advançe" "contains:Excluir"
++  q info "key:A" "key:B"      # 1o: aviso do fim do download; 2o: confirmacao -> B (nao)
++  run_app
++  check "B na confirmacao nao apaga nada" test -f "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
++  check "lista de arquivos continua" test -f "$SD/Data/romm/dl/1.lst"
++  end_scenario
++fi
++
++if scenario "e2e-delete-multifile"; then
++  start_server; new_sd; cfg_token
++  printf x >"$SD/Roms/PS/Outro Jogo.cue"
++  q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para" \
++    "contains:Crash" "contains:Excluir"
++  run_app
++  check "arquivos do jogo multi-arquivo apagados" sh -c "[ ! -e '$SD/Roms/PS/Crash Test (PS1).cue' ] && [ ! -e '$SD/Roms/PS/Crash Test (PS1).bin' ]"
++  check "outro jogo na mesma pasta intacto" test -f "$SD/Roms/PS/Outro Jogo.cue"
++  end_scenario
++fi
++
++if scenario "e2e-delete-multifile-list"; then
++  start_server; new_sd; cfg_token
++  q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para"
++  run_app
++  L=$(ls "$SD"/Data/romm/dl/*.lst 2>/dev/null | head -1)
++  check "download multi-arquivo gravou a lista" test -n "$L"
++  check "lista de jogos marca com * o jogo multi-arquivo ja baixado" grep -Eq '^  \| [0-9]+\. \* Crash' "$M/sel.log"
++  check "lista tem o CUE e o BIN com a pasta" sh -c "grep -qF 'PS$(printf '\t')Crash Test (PS1).cue' '$L' && grep -qF 'PS$(printf '\t')Crash Test (PS1).bin' '$L'"
++  end_scenario
++fi
++
++if scenario "e2e-delete-legacy"; then
++  start_server; new_sd; cfg_token
++  printf x >"$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"   # baixado por uma versao sem lista
++  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir"
++  run_app
++  check "arquivo unico antigo excluido pelo menu" test ! -e "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
++  end_scenario
++fi
++
+ if scenario "e2e-flaky-resume"; then
+   start_server --flaky; new_sd; cfg_token
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"
+-- 
+2.43.0
+
