@@ -126,18 +126,27 @@ load_settings() {
 to_real_nl() { printf '%s' "$1" | awk '{ gsub(/\\n/, "\n"); print }'; }
 to_lit_nl() { printf '%s' "$1" | awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }'; }
 
+# O infoscreen (sdl2imgshow) le o texto como Latin-1 e nao quebra linhas; o selector e o teclado leem UTF-8.
+# screen_text converte (acentos viram 1 byte Latin-1, aspas curvas etc. viram ASCII, o resto vira "?")
+# e quebra as linhas longas na largura da tela.  Ver lib/screentext.awk.
+screen_text() { # texto [corpo-da-fonte] -> texto pronto para "infoscreen -m"
+  _st=$(printf '%s\n' "$1" | LC_ALL=C awk -v fs="${2:-30}" -v px=880 -v tbl="$APP_DIR/data/latin1.tsv" \
+    -f "$APP_DIR/lib/screentext.awk" 2>/dev/null | LC_ALL=C tr -c '\11\12\40-\176' '?' | LC_ALL=C tr -s '?')
+  if [ -n "$_st" ]; then printf '%b' "$_st"; else printf '%s' "$1"; fi
+}
+
 ui_info() { # mostra o texto e segue (a imagem fica na tela)
-  "$INFOSCREEN" -m "$(to_real_nl "$1")" -fs "${2:-32}" >/dev/null 2>&1
+  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" "${2:-32}")" -fs "${2:-32}" >/dev/null 2>&1
 }
 
 ui_wait() { # texto [teclas] -> imprime a tecla pressionada
-  "$INFOSCREEN" -m "$(to_real_nl "$1")" -fs 30 -k "${2:-A B}" 2>/dev/null
+  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" 30)" -fs 30 -k "${2:-A B}" 2>/dev/null
 }
 
 ui_notice() { ui_wait "$1${NL}${NL}A: $L_OK" "A B" >/dev/null; }
 
 ui_confirm() { # texto -> 0 se A (sim)
-  _uk=$("$INFOSCREEN" -m "$(to_real_nl "$1")${NL}${NL}A: $L_YES      B: $L_NO" -fs 30 -k "A B" 2>/dev/null)
+  _uk=$("$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")${NL}${NL}A: $L_YES      B: $L_NO" 30)" -fs 30 -k "A B" 2>/dev/null)
   [ "$_uk" = A ]
 }
 

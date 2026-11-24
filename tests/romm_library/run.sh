@@ -108,6 +108,37 @@ if scenario "unit"; then
   eq "sanitize: so pontos" "$(SH 'dl_sanitize "..."')" "rom"
   eq "sanitize: barra invertida" "$(SH 'dl_sanitize "a\\b|c*d"')" "a_b_c_d"
 
+  # ---- texto do infoscreen: sdl2imgshow le Latin-1 (TTF_RenderText_Solid) e nao quebra linhas
+  hex_of() { od -An -v -tx1 | tr -d ' \n'; }
+  eq "screen_text: acentos viram 1 byte Latin-1" "$(SH 'screen_text "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
+  eq "screen_text: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'screen_text "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
+  eq "screen_text: macron vira a letra base" "$(SH 'screen_text "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
+  eq "screen_text: CJK vira um unico ?" "$(SH 'screen_text "ドラゴンクエスト"')" "?"
+  eq "screen_text: barra invertida e % ficam como estao" "$(SH 'screen_text "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
+  eq "screen_text: texto ASCII curto nao muda" "$(SH 'screen_text "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s" 28')" "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s"
+  eq "screen_text: linha em branco e quebra real preservadas" "$(SH 'screen_text "Baixando
+
+Jogo"')" "$(printf 'Baixando\n\nJogo')"
+  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
+  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "$_long")
+  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_text: linha longa e quebrada em varias" || bad "screen_text: linha longa nao quebrou"
+  eq "screen_text: quebrar nao perde nem troca palavras" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | iconv -f UTF-8 -t ISO-8859-1 | hex_of)"
+  _lw=$(printf '%s\n' "$_wr" | awk '{ if (length($0) > m) m = length($0) } END { print m }')
+  [ "$_lw" -le 60 ] && ok "screen_text: nenhuma linha passa de 60 caracteres ($_lw)" || bad "screen_text: linha com $_lw caracteres"
+  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
+  [ "$(printf '%s\n' "$_wr2" | wc -l)" -ge 2 ] && ok "screen_text: palavra maior que a tela sofre quebra dura" || bad "screen_text: palavra gigante nao quebrou"
+  # largura real na fonte do tema (so com Pillow)
+  if python3 -c 'import PIL' 2>/dev/null; then
+    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "O servidor não tem plataformas com jogos (ou seu usuário não pode vê-las). Confira o login." "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do screen_text "$t" 30; printf "\036"; done')
+    _mx=$(printf '%s' "$_ww" | python3 -I -c '
+import sys
+from PIL import ImageFont
+f = ImageFont.truetype(sys.argv[1], 30)
+raw = sys.stdin.buffer.read().decode("latin-1")
+print(int(max(f.getlength(l) for blk in raw.split("\x1e") for l in blk.split("\n") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
+    [ "$_mx" -le 1000 ] && ok "screen_text: maior linha mede $_mx px na fonte do tema (tela do Brick: 1024)" || bad "screen_text: linha de $_mx px passa da tela"
+  fi
+
   eq "urlenc UTF-8 + simbolos" "$(SH 'urlenc "Pokémon: Emerald & Co. (USA).gba"')" "Pok%C3%A9mon%3A%20Emerald%20%26%20Co.%20%28USA%29.gba"
   eq "fmt_size 0" "$(SH 'fmt_size 0')" "0 B"
   eq "fmt_size KB" "$(SH 'fmt_size 1536')" "2 KB"
@@ -287,6 +318,8 @@ if scenario "e2e-flaky-resume"; then
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"
   run_app
   check "queda detectada e explicada" grep -q "A conexão caiu" "$M/info.log"
+  check "infoscreen recebeu 'conexão' em Latin-1 (1 byte), nao em UTF-8" env LC_ALL=C grep -q "A conex$(printf '\343')o caiu" "$M/info.raw"
+  check "nenhum acento UTF-8 chegou ao infoscreen" bash -c "! LC_ALL=C grep -q \"$(printf '\303\243')\" '$M/info.raw'"
   check "servidor derrubou a conexao no meio" grep -q "DROPPED-HALFWAY" "$REQLOG"
   check "segunda tentativa retomou com Range" grep -Eq "range-from=[1-9][0-9]*" "$REQLOG"
   eq "arquivo final identico apos retomar" "$(sha_file "$SD/Roms/GBA/Big Flaky Adventure.gba" 2>/dev/null)" "$(sha_of 3)"
@@ -359,6 +392,7 @@ if scenario "e2e-nospace"; then
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para"
   MOCK_FREE_KB=100 run_app
   check "avisa falta de espaco" grep -q "Sem espaço livre" "$M/info.log"
+  check "falta de espaco: 'espaço' chegou em Latin-1" env LC_ALL=C grep -q "espa$(printf '\347')o" "$M/info.raw"
   check "nada gravado" sh -c "[ -z \"\$(find '$SD/Roms' -type f)\" ]"
   end_scenario
 fi

@@ -94,7 +94,7 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir 
 
 ## 7. Limitações e pendências
 
-- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 + 44 + 24 + 8 checagens); o
+- **Nada foi testado em hardware real.** Os testes são simulações (124 + 35 + 44 + 24 + 8 checagens); o
   daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
 - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
   causa identificada, correção entregue e **confirmada no aparelho pelo usuário em 2026-11-23**
@@ -263,3 +263,39 @@ Conferida a lista, o mesmo comando com `| Remove-Item -WhatIf` mostra o que seri
 `-WhatIf` apaga de fato. As fontes `NotoSans*-Regular.ttf` dentro de
 `Apps\PortMaster\PortMaster\themes\<tema>\` também podem ser apagadas à mão; extrair o pacote novo
 por cima não as recria.
+
+## 10. RomM Library no aparelho: texto das telas de download e de aviso (2026-11-23/24)
+
+**Relato do usuário:** o app "rodou perfeitamente"; só as fontes na hora do download e nas mensagens de
+aviso ficavam "bem bagunçadas". As fontes dos menus (mesmo pequenas) estavam ok.
+
+**Causa provável** (por leitura do código e dos binários; não vi a tela do aparelho):
+
+- Menus, lista de jogos e teclado usam `selector`/`VirtualKeyboard`, que leem UTF-8: ok.
+- Download e avisos usam `infoscreen.sh`, que chama `System/bin/sdl2imgshow`. Esse binário (14,9 KB)
+  importa só `TTF_RenderText_Solid`: o texto é lido como **Latin-1**, não UTF-8, e não há chamada de
+  quebra de linha. Efeito: com a interface em português, "não" saía como "NÃ£o", e aspas curvas,
+  reticências e títulos com macron ou caracteres japoneses viravam lixo; linhas longas passavam da
+  borda da tela.
+- A interface em inglês (ASCII) não sofria do problema dos acentos, mas os títulos dos jogos
+  continuavam podendo ter caracteres fora do ASCII.
+
+**Correção** (`Apps/RomMLibrary/lib/screentext.awk`, `data/latin1.tsv`, `screen_text` em `lib/common.sh`,
+usada por `ui_info`, `ui_wait`, `ui_confirm` e pela tela de progresso do download):
+
+- U+00A0–U+00FF viram 1 byte Latin-1 (acentos corretos na tela).
+- Aspas curvas, travessões, reticências, `™`, `€` e setas viram ASCII; macrons, carons e afins
+  (U+0100–U+024F, U+1E00–U+1EFF) viram a letra base; o que sobrar (japonês, chinês…) vira um `?`.
+- Linhas são quebradas por palavras na largura de 880 px estimada com a fonte do tema
+  (`wqy-microhei.ttf`, larguras medidas por classe de caractere e arredondadas para cima); palavra maior
+  que a tela sofre quebra dura. Se o awk falhar, o texto original é mostrado como antes.
+- Medição com a fonte real (Pillow): a maior linha dos casos de teste mede 860 px; a tela do Brick tem
+  1024 px e a do TSP 1280.
+
+**Testes:** `tests/romm_library/run.sh` passou de 109 para 124 checagens. O mock do `infoscreen` agora
+guarda os bytes exatos recebidos (`info.raw`) e o texto lido como UTF-8 (`info.log`); sem a correção, 5
+checagens de ponta a ponta falham (provado com o código antigo).
+
+**Limites:** os escapes são convertidos com `printf %b` e `tr` do BusyBox, o awk é o do BusyBox; só
+rodei com `dash` e `mawk`. A estimativa de largura é conservadora, não exata. Se ainda aparecer algo
+estranho, uma foto da tela mostra se o problema restante é de largura, de fonte ou de outro texto.

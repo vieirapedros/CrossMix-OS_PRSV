@@ -38,7 +38,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra�
 | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
 | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
 
-Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se os acentos aparecerem como quadradinhos), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
+Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se algum acento ainda sair errado nas telas de aviso), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
 
 ## Se algo der errado
 
@@ -50,6 +50,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
 | "Login recusado" | Usuário/senha ou token errados. O app tenta também o login OAuth caso o Basic seja recusado. |
 | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
 | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
+| Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
 
 ## Limitações
 

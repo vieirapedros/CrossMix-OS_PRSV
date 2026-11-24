@@ -47,7 +47,7 @@ dl_run() { # url parcial retomar(0|1) total titulo
     else
       _dr_line="$(fmt_size "$_dr_cur")$_dr_speed"
     fi
-    _dr_k=$("$INFOSCREEN" -m "$L_DL_PROGRESS${NL}${NL}$_dr_title${NL}${NL}$_dr_line${NL}${NL}$L_DL_CANCEL_HINT" -fs 28 -k B -t 1 2>/dev/null)
+    _dr_k=$("$INFOSCREEN" -m "$(screen_text "$L_DL_PROGRESS${NL}${NL}$_dr_title${NL}${NL}$_dr_line${NL}${NL}$L_DL_CANCEL_HINT" 28)" -fs 28 -k B -t 1 2>/dev/null)
     if [ "$_dr_k" = B ]; then
       DL_CANCELLED=1
       kill "$DL_PID" 2>/dev/null
