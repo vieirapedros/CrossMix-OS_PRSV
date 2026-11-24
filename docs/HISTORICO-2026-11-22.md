@@ -95,7 +95,7 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir 
 
 ## 7. Limitações e pendências
 
-- **Nada foi testado em hardware real.** Os testes são simulações (124 + 35 + 44 + 24 + 8 checagens); o
+- **Nada foi testado em hardware real.** Os testes são simulações (159 + 35 + 44 + 24 + 8 checagens); o
   daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
 - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
   causa identificada, correção entregue e **confirmada no aparelho pelo usuário em 2026-11-23**
@@ -300,3 +300,33 @@ checagens de ponta a ponta falham (provado com o código antigo).
 **Limites:** os escapes são convertidos com `printf %b` e `tr` do BusyBox, o awk é o do BusyBox; só
 rodei com `dash` e `mawk`. A estimativa de largura é conservadora, não exata. Se ainda aparecer algo
 estranho, uma foto da tela mostra se o problema restante é de largura, de fonte ou de outro texto.
+
+## 11. RomM Library: opção "Excluir do cartão SD" (2026-11-24)
+
+**Pedido do usuário:** às vezes a ROM baixada não funciona ou está quebrada, e não dava para apagá-la
+pelo menu do RomM.
+
+**O que foi feito** (`lib/download.sh`, `lib/screens.sh`, `lib/i18n.sh`):
+
+- Tela do jogo: quando ele está no cartão, o menu ganha "Excluir do cartão SD" (a numeração se ajusta;
+  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (A: sim, B: não) mostrando até 3
+  nomes, quantos itens a mais e o tamanho total, e avisa que saves e estados **não** são apagados.
+- Para só apagar o que o app baixou, cada download passa a gravar `Data/romm/dl/<id>.lst` (linhas
+  `pasta<TAB>item`, item = arquivo ou pasta direto dentro de `Roms/<pasta>/`). Vale também para jogos
+  de vários arquivos: o ZIP é extraído e cada item movido é anotado. Se a extração falhar no meio, o que
+  já foi movido também fica na lista.
+- Jogos de arquivo único baixados antes da lista existir são reconhecidos pelo caminho
+  (`Roms/<pasta>/<nome sanitizado>`). Jogos de vários arquivos baixados antes não têm como ser
+  reconhecidos com segurança: é preciso baixar de novo uma vez.
+- Segurança: item ou pasta vazio, `.`, `..` ou com `/` nunca é apagado; um item que a lista de **outro**
+  jogo também cita é mantido; nada fora de `Roms/` é tocado. Também apaga o `.rommpart`/`.state` desse
+  jogo e o `*_cache*.db` da pasta.
+- A lista de jogos agora marca com `* ` também os jogos de vários arquivos já baixados (antes só os de
+  arquivo único).
+
+**Testes:** `tests/romm_library/run.sh` foi de 124 para 159 checagens (exclusão de arquivo único, de
+vários arquivos, cancelamento com B, jogo antigo sem lista, item compartilhado, entradas perigosas
+na lista, saves e outro jogo na mesma pasta intactos).
+
+**Limites:** testado só em simulação (`dash`, `mawk`, `du`/`sort` do ambiente de teste), não no
+aparelho. Não apaga imagens/metadados que o scraper do JukaMix tenha gerado para o jogo.

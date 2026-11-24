@@ -313,6 +313,108 @@ if scenario "e2e-multifile-ps1"; then
   end_scenario
 fi
 
+# ---- excluir jogo baixado (menu do jogo) ------------------------------------------------------
+if scenario "unit-delete"; then
+  new_sd
+  R=$SD/Roms/GBA; L=$SD/Data/romm/dl
+  mkdir -p "$R/Disc Dir" "$L" "$SD/Saves" "$TMP/fora"
+  printf x >"$R/a.gba"; printf x >"$R/shared.bin"; printf x >"$R/b.gba"; printf x >"$R/Disc Dir/f.bin"
+  printf x >"$R/GBA_cache1.db"; printf s >"$SD/Saves/keep.sav"; printf x >"$TMP/fora/evil"
+  printf 'GBA\ta.gba\nGBA\tshared.bin\nGBA\tDisc Dir\nGBA\tsumiu.gba\n' >"$L/10.lst"
+  printf 'GBA\tb.gba\nGBA\tshared.bin\n' >"$L/11.lst"
+  eq "rom_inst_items: so o que existe no cartao" "$(SH 'rom_inst_items 10 GBA - 1 | wc -l | tr -d " "')" "3"
+  eq "rom_inst_items: jogo sem lista e sem arquivo" "$(SH 'rom_inst_items 99 GBA nada.gba 0 | wc -l | tr -d " "')" "0"
+  eq "rom_del_summary: nomes e +N" "$(SH 'rom_del_summary 10 GBA - 1' | sed -n '1,3p' | tr '\n' '|')" "a.gba|shared.bin|Disc Dir|"
+  SH 'rom_delete_do 10 GBA - 1'; rc=$?
+  eq "rom_delete_do devolve 0" "$rc" "0"
+  check "apagou o arquivo da lista" test ! -e "$R/a.gba"
+  check "apagou a pasta da lista (com o conteudo)" test ! -e "$R/Disc Dir"
+  check "manteve item usado por OUTRO jogo" test -f "$R/shared.bin"
+  check "nao tocou no arquivo de outro jogo" test -f "$R/b.gba"
+  check "limpou o cache da lista do emulador" test ! -e "$R/GBA_cache1.db"
+  check "saves intactos" test -f "$SD/Saves/keep.sav"
+  check "lista do jogo removida" test ! -e "$L/10.lst"
+  check "lista do outro jogo intacta" test -f "$L/11.lst"
+  # seguranca: itens perigosos na lista nunca sao apagados
+  printf 'GBA\t../../fora/evil\nGBA\t..\n..\tb.gba\nGBA\t.\nGBA\t\n\tb.gba\nGBA\ta/b\n' >"$L/12.lst"
+  eq "itens perigosos nem sao listados" "$(SH 'rom_inst_items 12 GBA - 1 | wc -l | tr -d " "')" "0"
+  SH 'rom_delete_do 12 GBA - 1' >/dev/null; rc=$?
+  eq "rom_delete_do sem nada valido devolve 1" "$rc" "1"
+  check "arquivo fora de Roms/ intacto" test -f "$TMP/fora/evil"
+  check "Roms/GBA e b.gba intactos" test -f "$R/b.gba"
+  # jogo de arquivo unico baixado antes das listas: reconhecido pelo caminho
+  printf x >"$R/Velho_ Jogo.gba"
+  eq "legado: reconhece pelo caminho" "$(SH 'rom_inst_items 77 GBA "Velho: Jogo.gba" 0')" "$(printf 'GBA\tVelho_ Jogo.gba')"
+  eq "legado: multi-arquivo sem lista nao e reconhecido" "$(SH 'rom_inst_items 77 GBA "Velho: Jogo.gba" 1 | wc -l | tr -d " "')" "0"
+  SH 'rom_delete_do 77 GBA "Velho: Jogo.gba" 0' >/dev/null; rc=$?
+  eq "legado: exclui" "$rc:$(test -e "$R/Velho_ Jogo.gba" && echo ainda || echo sumiu)" "0:sumiu"
+  # sobras de download deste jogo tambem somem
+  printf x >"$R/Outro.gba"; printf x >"$R/Outro.gba.rommpart"; printf 1 >"$R/.romm_55.state"
+  printf 'GBA\tOutro.gba\n' >"$L/55.lst"
+  SH 'rom_delete_do 55 GBA "Outro.gba" 0' >/dev/null
+  check "apagou .rommpart e .state do jogo" sh -c "[ ! -e '$R/Outro.gba.rommpart' ] && [ ! -e '$R/.romm_55.state' ]"
+  end_scenario
+fi
+
+if scenario "e2e-delete-single"; then
+  start_server; new_sd; cfg_token
+  mkdir -p "$SD/Saves/GBA"; printf s >"$SD/Saves/GBA/keep.sav"
+  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
+    "contains:Advançe" "contains:Excluir"
+  run_app
+  f="$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+  check "jogo foi baixado e excluido" test ! -e "$f"
+  check "lista de arquivos foi removida" sh -c "! ls '$SD/Data/romm/dl' 2>/dev/null | grep -q lst"
+  check "saves intactos" test -f "$SD/Saves/GBA/keep.sav"
+  eq "Excluir so aparece com o jogo no cartao (1 menu de 3)" "$(grep -c '^  | .*Excluir do cartão SD' "$M/sel.log")" "1"
+  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/info.log"
+  check "mostrou o resultado" grep -q "Excluído do cartão SD" "$M/info.log"
+  check "log registra o que apagou" grep -q "excluir id=.*apagado Roms/GBA/Adv" "$APPLOG"
+  end_scenario
+fi
+
+if scenario "e2e-delete-cancel"; then
+  start_server; new_sd; cfg_token
+  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
+    "contains:Advançe" "contains:Excluir"
+  q info "key:A" "key:B"      # 1o: aviso do fim do download; 2o: confirmacao -> B (nao)
+  run_app
+  check "B na confirmacao nao apaga nada" test -f "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+  check "lista de arquivos continua" test -f "$SD/Data/romm/dl/1.lst"
+  end_scenario
+fi
+
+if scenario "e2e-delete-multifile"; then
+  start_server; new_sd; cfg_token
+  printf x >"$SD/Roms/PS/Outro Jogo.cue"
+  q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para" \
+    "contains:Crash" "contains:Excluir"
+  run_app
+  check "arquivos do jogo multi-arquivo apagados" sh -c "[ ! -e '$SD/Roms/PS/Crash Test (PS1).cue' ] && [ ! -e '$SD/Roms/PS/Crash Test (PS1).bin' ]"
+  check "outro jogo na mesma pasta intacto" test -f "$SD/Roms/PS/Outro Jogo.cue"
+  end_scenario
+fi
+
+if scenario "e2e-delete-multifile-list"; then
+  start_server; new_sd; cfg_token
+  q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para"
+  run_app
+  L=$(ls "$SD"/Data/romm/dl/*.lst 2>/dev/null | head -1)
+  check "download multi-arquivo gravou a lista" test -n "$L"
+  check "lista de jogos marca com * o jogo multi-arquivo ja baixado" grep -Eq '^  \| [0-9]+\. \* Crash' "$M/sel.log"
+  check "lista tem o CUE e o BIN com a pasta" sh -c "grep -qF 'PS$(printf '\t')Crash Test (PS1).cue' '$L' && grep -qF 'PS$(printf '\t')Crash Test (PS1).bin' '$L'"
+  end_scenario
+fi
+
+if scenario "e2e-delete-legacy"; then
+  start_server; new_sd; cfg_token
+  printf x >"$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"   # baixado por uma versao sem lista
+  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir"
+  run_app
+  check "arquivo unico antigo excluido pelo menu" test ! -e "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+  end_scenario
+fi
+
 if scenario "e2e-flaky-resume"; then
   start_server --flaky; new_sd; cfg_token
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"

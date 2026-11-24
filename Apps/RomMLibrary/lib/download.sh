@@ -80,6 +80,7 @@ dl_move_into() { # origem destino: move tudo (inclusive ocultos), sobrescrevendo
     _mv_t="$2/$(basename "$_mv_f")"
     [ -d "$_mv_f" ] && [ -d "$_mv_t" ] && rm -rf "$_mv_t"
     mv -f "$_mv_f" "$2/" || return 1
+    dl_note_item "$(basename "$_mv_f")"
   done
   return 0
 }
@@ -104,6 +105,7 @@ dl_extract() { # zip pasta-destino pasta-rom id [nome-final-se-arquivo-unico]
   # arquivo unico entregue dentro de um ZIP (rota /api/roms/download): grava com o nome ja sanitizado
   if [ -n "$5" ] && [ "$_ex_n" = 1 ] && [ -f "$_ex_one" ]; then
     mv -f "$_ex_one" "$2/$5" || { rm -rf "$_ex_tmp"; return 1; }
+    dl_note_item "$5"
     rm -rf "$_ex_tmp"
     return 0
   fi
@@ -230,11 +232,14 @@ rom_download() {
   fi
 
   # ---- sucesso no curl: confere, move/extrai, limpa
+  mkdir -p "$TMPD" 2>/dev/null
+  : >"$TMPD/dl_items"
   if [ "$_kind" = zip ]; then
     ui_info "$L_DL_EXTRACT"
     _single=""
     [ "$_multi" = 1 ] || _single=$_clean
     if ! dl_extract "$_part" "$_dir" "$_folder" "$_id" "$_single"; then
+      dl_manifest_write "$_id" "$_folder"   # o que chegou a ser movido ainda pode ser excluido pelo menu
       rm -f "$_part" "$_state"
       DL_MSG="$L_DL_EXTRACT_FAIL"
       return 1
@@ -252,14 +257,132 @@ rom_download() {
       return 1
     fi
     mv -f "$_part" "$_dir/$_clean" || { DL_MSG="$L_DL_FAILED"; return 1; }
+    dl_note_item "$_clean"
     _shown="$_clean"
   fi
+  dl_manifest_write "$_id" "$_folder"
   rm -f "$_state"
   rm -f "$_dir"/*_cache*.db 2>/dev/null
   sync
   DL_FINAL="$_dir/$_clean"
   DL_MSG="$L_DL_OK Roms/$_folder/${NL}$_shown${NL}${NL}$L_DL_OK2"
   log "download ok: id=$_id -> Roms/$_folder/$_shown"
+  return 0
+}
+
+# ---------------------------------------------------------------- o que foi baixado (para excluir pelo menu)
+# Cada download bem-sucedido grava Data/romm/dl/<id>.lst com linhas "pasta<TAB>item" (item = arquivo ou
+# pasta direto dentro de Roms/<pasta>/).  Excluir so apaga o que esta nessa lista; jogos de arquivo unico
+# baixados antes dessa lista existir sao reconhecidos pelo caminho (pasta + nome do arquivo no RomM).
+dl_note_item() { printf '%s\n' "$1" >>"$TMPD/dl_items" 2>/dev/null; }
+
+dl_manifest_write() { # id pasta: junta $TMPD/dl_items ao manifesto do jogo (troca as linhas da mesma pasta)
+  [ -s "$TMPD/dl_items" ] || return 0
+  mkdir -p "$DL_DIR" 2>/dev/null || return 0
+  _mw="$DL_DIR/$1.lst"
+  {
+    [ -f "$_mw" ] && awk -F'\t' -v f="$2" '$1 != f' "$_mw"
+    awk -v f="$2" '{ print f "\t" $0 }' "$TMPD/dl_items"
+  } >"$_mw.new" 2>/dev/null && mv -f "$_mw.new" "$_mw"
+  return 0
+}
+
+dl_safe_name() { # nome simples: nao vazio, sem barra, sem quebra de linha, nem . nem ..
+  case "$1" in '' | . | .. | */* | *"$NL"*) return 1 ;; esac
+  return 0
+}
+
+rom_inst_items() { # id pasta fs multi -> linhas "pasta<TAB>item" que existem no cartao
+  _ii_l="$DL_DIR/$1.lst"
+  _ii_any=""
+  if [ -f "$_ii_l" ]; then
+    while IFS=$TAB read -r _ii_f _ii_i; do
+      dl_safe_name "$_ii_f" && dl_safe_name "$_ii_i" || continue
+      [ -e "$ROMS_DIR/$_ii_f/$_ii_i" ] || continue
+      printf '%s\t%s\n' "$_ii_f" "$_ii_i"
+      _ii_any=1
+    done <"$_ii_l"
+  fi
+  [ -n "$_ii_any" ] && return 0
+  # sem lista (baixado por uma versao anterior): so jogos de arquivo unico, pelo caminho
+  if [ -n "$2" ] && [ "$4" != 1 ] && [ "$3" != - ] && [ -n "$3" ]; then
+    _ii_n=$(dl_sanitize "$3")
+    [ -f "$ROMS_DIR/$2/$_ii_n" ] && printf '%s\t%s\n' "$2" "$_ii_n"
+  fi
+  return 0
+}
+
+dl_item_shared() { # id pasta item -> 0 se a lista de OUTRO jogo tambem tem esse item (nao apagar)
+  for _sh_f in "$DL_DIR"/*.lst; do
+    [ -f "$_sh_f" ] || continue
+    [ "$_sh_f" = "$DL_DIR/$1.lst" ] && continue
+    grep -Fxq "$2$TAB$3" "$_sh_f" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+rom_del_summary() { # id pasta fs multi -> ate 3 nomes, "+N a mais" e o tamanho total
+  mkdir -p "$TMPD" 2>/dev/null
+  rom_inst_items "$1" "$2" "$3" "$4" >"$TMPD/del_items"
+  _ds_n=0
+  _ds_kb=0
+  _ds_out=""
+  while IFS=$TAB read -r _ds_f _ds_i; do
+    _ds_n=$((_ds_n + 1))
+    [ "$_ds_n" -le 3 ] && _ds_out="$_ds_out$_ds_i$NL"
+    _ds_k=$(du -sk "$ROMS_DIR/$_ds_f/$_ds_i" 2>/dev/null | awk '{ print $1; exit }')
+    case "$_ds_k" in '' | *[!0-9]*) _ds_k=0 ;; esac
+    _ds_kb=$((_ds_kb + _ds_k))
+  done <"$TMPD/del_items"
+  [ "$_ds_n" -gt 3 ] && _ds_out="$_ds_out+$((_ds_n - 3)) $L_DEL_MORE$NL"
+  printf '%s%s' "$_ds_out" "$(fmt_size $((_ds_kb * 1024)))"
+}
+
+rom_delete_do() { # id pasta fs multi -> apaga so o que o app baixou; DEL_MSG = resultado; retorna 0 se tudo certo
+  DEL_MSG=""
+  mkdir -p "$TMPD" 2>/dev/null
+  rom_inst_items "$1" "$2" "$3" "$4" >"$TMPD/del_items"
+  if [ ! -s "$TMPD/del_items" ]; then
+    DEL_MSG="$L_DEL_NONE"
+    return 1
+  fi
+  _rd_ok=0
+  _rd_fail=0
+  : >"$TMPD/del_dirs"
+  while IFS=$TAB read -r _rd_f _rd_i; do
+    dl_safe_name "$_rd_f" && dl_safe_name "$_rd_i" || continue
+    if dl_item_shared "$1" "$_rd_f" "$_rd_i"; then
+      log "excluir id=$1: mantido (outro jogo usa) Roms/$_rd_f/$_rd_i"
+      continue
+    fi
+    rm -rf -- "${ROMS_DIR:?}/${_rd_f:?}/${_rd_i:?}" 2>/dev/null
+    if [ -e "$ROMS_DIR/$_rd_f/$_rd_i" ]; then
+      _rd_fail=$((_rd_fail + 1))
+      log "excluir id=$1: FALHOU Roms/$_rd_f/$_rd_i"
+    else
+      _rd_ok=$((_rd_ok + 1))
+      log "excluir id=$1: apagado Roms/$_rd_f/$_rd_i"
+    fi
+    printf '%s\n' "$_rd_f" >>"$TMPD/del_dirs"
+  done <"$TMPD/del_items"
+  [ -n "$2" ] && dl_safe_name "$2" && printf '%s\n' "$2" >>"$TMPD/del_dirs"
+  # restos de download deste jogo e cache da lista do emulador (para o jogo sumir da lista)
+  _rd_clean=""
+  [ "$3" != - ] && [ -n "$3" ] && _rd_clean=$(dl_sanitize "$3")
+  sort -u "$TMPD/del_dirs" >"$TMPD/del_dirs.u" 2>/dev/null
+  while IFS= read -r _rd_d; do
+    [ -d "$ROMS_DIR/$_rd_d" ] || continue
+    rm -f "$ROMS_DIR/$_rd_d/.romm_$1.state" 2>/dev/null
+    if [ -n "$_rd_clean" ]; then rm -f "$ROMS_DIR/$_rd_d/$_rd_clean.rommpart" "$ROMS_DIR/$_rd_d/$_rd_clean.zip.rommpart" 2>/dev/null; fi
+    rm -f "$ROMS_DIR/$_rd_d"/*_cache*.db 2>/dev/null
+  done <"$TMPD/del_dirs.u"
+  sync
+  if [ "$_rd_fail" -gt 0 ]; then
+    DEL_MSG="$L_DEL_FAIL"
+    return 1
+  fi
+  rm -f "$DL_DIR/$1.lst" 2>/dev/null
+  DEL_MSG="$L_DEL_OK"
   return 0
 }
 

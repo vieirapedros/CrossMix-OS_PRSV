@@ -5,6 +5,7 @@
 NL='
 '
 US=$(printf '\037')
+TAB=$(printf '\t')
 
 SDCARD=${ROMM_SDCARD:-/mnt/SDCARD}
 BIN_DIR="$SDCARD/System/bin"
@@ -12,6 +13,7 @@ SCRIPTS_DIR="$SDCARD/System/usr/trimui/scripts"
 ROMS_DIR="$SDCARD/Roms"
 LOGS_DIR="$SDCARD/System/logs"
 DATA_DIR="$SDCARD/Data/romm"
+DL_DIR="$DATA_DIR/dl"   # lista dos arquivos de cada jogo baixado (<id>.lst), usada para excluir
 CFG="$DATA_DIR/config.json"
 LOG="$LOGS_DIR/romm_library.log"
 TS_BIN="$BIN_DIR/tailscale"

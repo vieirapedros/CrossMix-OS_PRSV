@@ -20,9 +20,10 @@ Dentro do Tailscale o tráfego já é criptografado; `http://` é o jeito mais s
 
 - **Explorar plataformas** → escolha a plataforma → lista paginada (A–Z). No topo: `[ Buscar... ]` (dentro da plataforma) e `[ Ir para a letra... ]`.
 - **Buscar jogo** no menu principal procura em todas as plataformas.
-- `* ` na frente do nome = o arquivo já está no cartão.
+- `* ` na frente do nome = o jogo já está no cartão.
 - Escolha o jogo → **Baixar para o cartão SD**. Aparece o progresso; **B para** e o download pode ser **retomado** depois (basta baixar de novo).
 - Terminando, o app apaga o cache da lista da pasta (`*_cache*.db`); se o jogo não aparecer, reinicie o MainUI.
+- **Excluir do cartão SD**: na tela de um jogo que já está no cartão aparece essa opção (útil para ROM quebrada ou que não abre). Pede confirmação (A: sim, B: não) e mostra o que será apagado. Só apaga o que o app baixou; **saves e estados de jogo não são apagados**. Também limpa restos de download desse jogo e o cache da lista (`*_cache*.db`), para ele sumir da lista do emulador.
 
 ### Para qual pasta vai?
 
@@ -34,6 +35,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra�
 
 | O quê | Onde |
 |---|---|
+| Lista de arquivos de cada jogo baixado | `Data/romm/dl/<id>.lst` (linhas `pasta<TAB>item`); é o que a opção Excluir usa |
 | Config (URL, login, token, pastas lembradas) | `Data/romm/config.json` — **texto puro, não versione** (já está no `.gitignore`) |
 | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
 | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
@@ -49,6 +51,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
 | "Não consegui conectar" | Servidor desligado, porta errada, ou Tailscale parado (o app avisa o estado do Tailscale). |
 | "Login recusado" | Usuário/senha ou token errados. O app tenta também o login OAuth caso o Basic seja recusado. |
 | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
+| Jogo baixado não aparece com "Excluir" | O app só sabe excluir o que baixou: cada download grava a lista de arquivos em `Data/romm/dl/<id>.lst`. Jogos de **arquivo único** baixados antes dessa lista existir são reconhecidos pelo nome; jogos de **vários arquivos** (ZIP) baixados antes dela não: baixe-o de novo uma vez (sobrescreve) e a opção passa a aparecer. |
 | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
 | Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
 

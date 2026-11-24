@@ -24,20 +24,30 @@ screen_game() { # usa R_*
   _sg_pname=$R_PNAME
   [ -n "$_sg_pname" ] || _sg_pname=$(plat_name_by_id "$R_PID")
   while :; do
+    # "ja esta no cartao": pela lista gravada no download, ou (jogo de arquivo unico baixado antes) pelo caminho
     _sg_ex=""
-    if [ -n "$_sg_folder" ] && [ "$R_MULTI" != 1 ] && [ "$R_FS" != - ] &&
-      [ -f "$ROMS_DIR/$_sg_folder/$(dl_sanitize "$R_FS")" ]; then
-      _sg_ex=1
-    fi
+    [ -n "$(rom_inst_items "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")" ] && _sg_ex=1
     _sg_l2=$_sg_pname
     [ "$R_SIZE" != 0 ] && _sg_l2="${_sg_l2:+$_sg_l2  -  }$(fmt_size "$R_SIZE")"
     [ -n "$R_REG" ] && _sg_l2="${_sg_l2:+$_sg_l2  -  }$R_REG"
     if [ -n "$_sg_folder" ]; then _sg_dest="Roms/$_sg_folder"; else _sg_dest="?"; fi
     if [ -n "$_sg_ex" ]; then _sg_dl="$L_DL_AGAIN"; else _sg_dl="$L_DL"; fi
-    _sg_c=$(ui_choose "$R_NAME${NL}$_sg_l2${NL}$L_DEST: $_sg_dest" \
-      "1. $_sg_dl" "2. $L_DL_FOLDER" "3. $L_DL_BACK")
-    case "$(choice_num "$_sg_c")" in
-    1)
+    # menu numerado; "Excluir" so aparece quando o jogo esta no cartao
+    set -- "1. $_sg_dl"
+    _sg_n=2
+    _sg_ndel=0
+    if [ -n "$_sg_ex" ]; then
+      set -- "$@" "$_sg_n. $L_DL_DELETE"
+      _sg_ndel=$_sg_n
+      _sg_n=$((_sg_n + 1))
+    fi
+    set -- "$@" "$_sg_n. $L_DL_FOLDER"
+    _sg_nfld=$_sg_n
+    _sg_n=$((_sg_n + 1))
+    set -- "$@" "$_sg_n. $L_DL_BACK"
+    _sg_c=$(ui_choose "$R_NAME${NL}$_sg_l2${NL}$L_DEST: $_sg_dest" "$@")
+    _sg_k=$(choice_num "$_sg_c")
+    if [ "$_sg_k" = 1 ]; then
       if [ -z "$_sg_folder" ]; then
         _sg_folder=$(plat_ask_folder "$R_PID" "$R_PSLUG" "$R_PFS")
         if [ -z "$_sg_folder" ]; then
@@ -49,13 +59,18 @@ screen_game() { # usa R_*
       _sg_rc=$?
       ui_notice "$DL_MSG"
       [ "$_sg_rc" = 0 ] && return 0
-      ;;
-    2)
+    elif [ "$_sg_ndel" != 0 ] && [ "$_sg_k" = "$_sg_ndel" ]; then
+      _sg_sum=$(rom_del_summary "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")
+      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES"; then
+        rom_delete_do "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI"
+        ui_notice "$DEL_MSG${NL}$R_NAME"
+      fi
+    elif [ "$_sg_k" = "$_sg_nfld" ]; then
       _sg_nf=$(plat_ask_folder "$R_PID" "$R_PSLUG" "$R_PFS")
       [ -n "$_sg_nf" ] && _sg_folder=$_sg_nf
-      ;;
-    *) return 0 ;;
-    esac
+    else
+      return 0
+    fi
   done
 }
 
@@ -104,10 +119,8 @@ screen_games() { # platform_id nome slug fs_slug busca
       else
         _gmf=$_gfolder
       fi
-      if [ -n "$_gmf" ] && [ "$_e" != 1 ] && [ "$_d" != - ] &&
-        [ -f "$ROMS_DIR/$_gmf/$(dl_sanitize "$_d")" ]; then
-        _gl="* $_gl"
-      fi
+      # "* " = ja esta no cartao (pela lista gravada no download, ou pelo caminho nos jogos de arquivo unico antigos)
+      [ -n "$(rom_inst_items "$_a" "$_gmf" "$_d" "$_e")" ] && _gl="* $_gl"
       set -- "$@" "$_gn. $_gl"
     done <"$TMPD/page.tsv"
     [ "$_goff" -gt 0 ] && set -- "$@" "$L_PREV"
