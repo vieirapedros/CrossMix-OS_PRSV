@@ -1,0 +1,982 @@
+From 450f1ddf57dfab8417c93e22f58603806648afbd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 24 Nov 2026 02:06:49 -0300
+Subject: [PATCH] RomM Library: fix garbled text on the download and warning
+ screens
+
+Reported on the device: the app works, but the download progress and the warning
+messages looked garbled while the menus were fine.
+
+Those screens go through infoscreen.sh -> sdl2imgshow, which draws with
+TTF_RenderText_Solid: the text is read as Latin-1 (not UTF-8) and nothing wraps.
+The menus use selector/VirtualKeyboard, which read UTF-8.
+
+- screen_text (lib/common.sh) + lib/screentext.awk + data/latin1.tsv: U+00A0..FF become one
+  Latin-1 byte; curly quotes, dashes, ellipsis and Latin letters outside Latin-1 become ASCII;
+  anything left (CJK) becomes "?"; lines are word-wrapped to 880 px estimated for the theme font.
+  On any failure the original text is shown as before.
+- used by ui_info, ui_wait, ui_confirm and the download progress screen.
+- tests: the infoscreen mock keeps the raw bytes (info.raw) and the UTF-8 reading (info.log);
+  15 new checks (109 -> 124), 5 of them fail with the old code.
+- README and docs/HISTORICO-2026-11-22.md (section 10) updated.
+
+Not verified on the device: only dash and mawk here, not the BusyBox awk/tr.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RhMAqBm84PVkwcVFZvG6f2
+---
+ Apps/RomMLibrary/README.md             |   3 +-
+ Apps/RomMLibrary/data/latin1.tsv       | 583 +++++++++++++++++++++++++
+ Apps/RomMLibrary/lib/common.sh         |  15 +-
+ Apps/RomMLibrary/lib/download.sh       |   2 +-
+ Apps/RomMLibrary/lib/screentext.awk    | 131 ++++++
+ README.md                              |   2 +-
+ docs/HISTORICO-2026-11-22.md           |  38 +-
+ tests/romm_library/mocks/infoscreen.sh |   8 +-
+ tests/romm_library/run.sh              |  34 ++
+ 9 files changed, 808 insertions(+), 8 deletions(-)
+ create mode 100644 Apps/RomMLibrary/data/latin1.tsv
+ create mode 100644 Apps/RomMLibrary/lib/screentext.awk
+
+diff --git a/Apps/RomMLibrary/README.md b/Apps/RomMLibrary/README.md
+index a1ded701..a3ccaee4 100644
+--- a/Apps/RomMLibrary/README.md
++++ b/Apps/RomMLibrary/README.md
+@@ -38,7 +38,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra
+ | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
+ | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
+ 
+-Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se os acentos aparecerem como quadradinhos), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
++Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se algum acento ainda sair errado nas telas de aviso), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
+ 
+ ## Se algo der errado
+ 
+@@ -50,6 +50,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
+ | "Login recusado" | Usuário/senha ou token errados. O app tenta também o login OAuth caso o Basic seja recusado. |
+ | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
+ | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
++| Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
+ 
+ ## Limitações
+ 
+diff --git a/Apps/RomMLibrary/data/latin1.tsv b/Apps/RomMLibrary/data/latin1.tsv
+new file mode 100644
+index 00000000..992eb829
+--- /dev/null
++++ b/Apps/RomMLibrary/data/latin1.tsv
+@@ -0,0 +1,583 @@
++# UTF-8 -> texto para o infoscreen (sdl2imgshow le Latin-1). Gerado: U+00A0..FF viram \0ooo (octal, um byte);
++# pontuacao tipografica e letras latinas fora do Latin-1 viram ASCII. Campos separados por TAB.
++ 	 
++¡	\0241
++¢	\0242
++£	\0243
++¤	\0244
++¥	\0245
++¦	\0246
++§	\0247
++¨	\0250
++©	\0251
++ª	\0252
++«	\0253
++¬	\0254
++­	-
++®	\0256
++¯	\0257
++°	\0260
++±	\0261
++²	\0262
++³	\0263
++´	\0264
++µ	\0265
++¶	\0266
++·	\0267
++¸	\0270
++¹	\0271
++º	\0272
++»	\0273
++¼	\0274
++½	\0275
++¾	\0276
++¿	\0277
++À	\0300
++Á	\0301
++Â	\0302
++Ã	\0303
++Ä	\0304
++Å	\0305
++Æ	\0306
++Ç	\0307
++È	\0310
++É	\0311
++Ê	\0312
++Ë	\0313
++Ì	\0314
++Í	\0315
++Î	\0316
++Ï	\0317
++Ð	\0320
++Ñ	\0321
++Ò	\0322
++Ó	\0323
++Ô	\0324
++Õ	\0325
++Ö	\0326
++×	\0327
++Ø	\0330
++Ù	\0331
++Ú	\0332
++Û	\0333
++Ü	\0334
++Ý	\0335
++Þ	\0336
++ß	\0337
++à	\0340
++á	\0341
++â	\0342
++ã	\0343
++ä	\0344
++å	\0345
++æ	\0346
++ç	\0347
++è	\0350
++é	\0351
++ê	\0352
++ë	\0353
++ì	\0354
++í	\0355
++î	\0356
++ï	\0357
++ð	\0360
++ñ	\0361
++ò	\0362
++ó	\0363
++ô	\0364
++õ	\0365
++ö	\0366
++÷	\0367
++ø	\0370
++ù	\0371
++ú	\0372
++û	\0373
++ü	\0374
++ý	\0375
++þ	\0376
++ÿ	\0377
++‐	-
++‑	-
++‒	-
++–	-
++—	-
++―	-
++‘	'
++’	'
++‚	,
++‛	'
++“	"
++”	"
++„	"
++•	-
++‣	-
++…	...
++′	'
++″	"
++‹	<
++›	>
++€	EUR
++™	(TM)
++←	<-
++→	->
++↔	<->
++−	-
++★	*
++☆	*
++ 	 
++ 	 
++ 	 
++​	
++　	 
++Ā	A
++ā	a
++Ă	A
++ă	a
++Ą	A
++ą	a
++Ć	C
++ć	c
++Ĉ	C
++ĉ	c
++Ċ	C
++ċ	c
++Č	C
++č	c
++Ď	D
++ď	d
++Đ	D
++đ	d
++Ē	E
++ē	e
++Ĕ	E
++ĕ	e
++Ė	E
++ė	e
++Ę	E
++ę	e
++Ě	E
++ě	e
++Ĝ	G
++ĝ	g
++Ğ	G
++ğ	g
++Ġ	G
++ġ	g
++Ģ	G
++ģ	g
++Ĥ	H
++ĥ	h
++Ħ	H
++ħ	h
++Ĩ	I
++ĩ	i
++Ī	I
++ī	i
++Ĭ	I
++ĭ	i
++Į	I
++į	i
++İ	I
++ı	i
++Ĵ	J
++ĵ	j
++Ķ	K
++ķ	k
++ĸ	k
++Ĺ	L
++ĺ	l
++Ļ	L
++ļ	l
++Ľ	L
++ľ	l
++Ŀ	L
++ŀ	l
++Ł	L
++ł	l
++Ń	N
++ń	n
++Ņ	N
++ņ	n
++Ň	N
++ň	n
++Ŋ	N
++ŋ	n
++Ō	O
++ō	o
++Ŏ	O
++ŏ	o
++Ő	O
++ő	o
++Œ	OE
++œ	oe
++Ŕ	R
++ŕ	r
++Ŗ	R
++ŗ	r
++Ř	R
++ř	r
++Ś	S
++ś	s
++Ŝ	S
++ŝ	s
++Ş	S
++ş	s
++Š	S
++š	s
++Ţ	T
++ţ	t
++Ť	T
++ť	t
++Ŧ	T
++ŧ	t
++Ũ	U
++ũ	u
++Ū	U
++ū	u
++Ŭ	U
++ŭ	u
++Ů	U
++ů	u
++Ű	U
++ű	u
++Ų	U
++ų	u
++Ŵ	W
++ŵ	w
++Ŷ	Y
++ŷ	y
++Ÿ	Y
++Ź	Z
++ź	z
++Ż	Z
++ż	z
++Ž	Z
++ž	z
++ſ	s
++Ơ	O
++ơ	o
++Ư	U
++ư	u
++Ǎ	A
++ǎ	a
++Ǐ	I
++ǐ	i
++Ǒ	O
++ǒ	o
++Ǔ	U
++ǔ	u
++Ǖ	U
++ǖ	u
++Ǘ	U
++ǘ	u
++Ǚ	U
++ǚ	u
++Ǜ	U
++ǜ	u
++Ǟ	A
++ǟ	a
++Ǡ	A
++ǡ	a
++Ǧ	G
++ǧ	g
++Ǩ	K
++ǩ	k
++Ǫ	O
++ǫ	o
++Ǭ	O
++ǭ	o
++ǰ	j
++Ǵ	G
++ǵ	g
++Ǹ	N
++ǹ	n
++Ǻ	A
++ǻ	a
++Ȁ	A
++ȁ	a
++Ȃ	A
++ȃ	a
++Ȅ	E
++ȅ	e
++Ȇ	E
++ȇ	e
++Ȉ	I
++ȉ	i
++Ȋ	I
++ȋ	i
++Ȍ	O
++ȍ	o
++Ȏ	O
++ȏ	o
++Ȑ	R
++ȑ	r
++Ȓ	R
++ȓ	r
++Ȕ	U
++ȕ	u
++Ȗ	U
++ȗ	u
++Ș	S
++ș	s
++Ț	T
++ț	t
++Ȟ	H
++ȟ	h
++Ȧ	A
++ȧ	a
++Ȩ	E
++ȩ	e
++Ȫ	O
++ȫ	o
++Ȭ	O
++ȭ	o
++Ȯ	O
++ȯ	o
++Ȱ	O
++ȱ	o
++Ȳ	Y
++ȳ	y
++Ḁ	A
++ḁ	a
++Ḃ	B
++ḃ	b
++Ḅ	B
++ḅ	b
++Ḇ	B
++ḇ	b
++Ḉ	C
++ḉ	c
++Ḋ	D
++ḋ	d
++Ḍ	D
++ḍ	d
++Ḏ	D
++ḏ	d
++Ḑ	D
++ḑ	d
++Ḓ	D
++ḓ	d
++Ḕ	E
++ḕ	e
++Ḗ	E
++ḗ	e
++Ḙ	E
++ḙ	e
++Ḛ	E
++ḛ	e
++Ḝ	E
++ḝ	e
++Ḟ	F
++ḟ	f
++Ḡ	G
++ḡ	g
++Ḣ	H
++ḣ	h
++Ḥ	H
++ḥ	h
++Ḧ	H
++ḧ	h
++Ḩ	H
++ḩ	h
++Ḫ	H
++ḫ	h
++Ḭ	I
++ḭ	i
++Ḯ	I
++ḯ	i
++Ḱ	K
++ḱ	k
++Ḳ	K
++ḳ	k
++Ḵ	K
++ḵ	k
++Ḷ	L
++ḷ	l
++Ḹ	L
++ḹ	l
++Ḻ	L
++ḻ	l
++Ḽ	L
++ḽ	l
++Ḿ	M
++ḿ	m
++Ṁ	M
++ṁ	m
++Ṃ	M
++ṃ	m
++Ṅ	N
++ṅ	n
++Ṇ	N
++ṇ	n
++Ṉ	N
++ṉ	n
++Ṋ	N
++ṋ	n
++Ṍ	O
++ṍ	o
++Ṏ	O
++ṏ	o
++Ṑ	O
++ṑ	o
++Ṓ	O
++ṓ	o
++Ṕ	P
++ṕ	p
++Ṗ	P
++ṗ	p
++Ṙ	R
++ṙ	r
++Ṛ	R
++ṛ	r
++Ṝ	R
++ṝ	r
++Ṟ	R
++ṟ	r
++Ṡ	S
++ṡ	s
++Ṣ	S
++ṣ	s
++Ṥ	S
++ṥ	s
++Ṧ	S
++ṧ	s
++Ṩ	S
++ṩ	s
++Ṫ	T
++ṫ	t
++Ṭ	T
++ṭ	t
++Ṯ	T
++ṯ	t
++Ṱ	T
++ṱ	t
++Ṳ	U
++ṳ	u
++Ṵ	U
++ṵ	u
++Ṷ	U
++ṷ	u
++Ṹ	U
++ṹ	u
++Ṻ	U
++ṻ	u
++Ṽ	V
++ṽ	v
++Ṿ	V
++ṿ	v
++Ẁ	W
++ẁ	w
++Ẃ	W
++ẃ	w
++Ẅ	W
++ẅ	w
++Ẇ	W
++ẇ	w
++Ẉ	W
++ẉ	w
++Ẋ	X
++ẋ	x
++Ẍ	X
++ẍ	x
++Ẏ	Y
++ẏ	y
++Ẑ	Z
++ẑ	z
++Ẓ	Z
++ẓ	z
++Ẕ	Z
++ẕ	z
++ẖ	h
++ẗ	t
++ẘ	w
++ẙ	y
++Ạ	A
++ạ	a
++Ả	A
++ả	a
++Ấ	A
++ấ	a
++Ầ	A
++ầ	a
++Ẩ	A
++ẩ	a
++Ẫ	A
++ẫ	a
++Ậ	A
++ậ	a
++Ắ	A
++ắ	a
++Ằ	A
++ằ	a
++Ẳ	A
++ẳ	a
++Ẵ	A
++ẵ	a
++Ặ	A
++ặ	a
++Ẹ	E
++ẹ	e
++Ẻ	E
++ẻ	e
++Ẽ	E
++ẽ	e
++Ế	E
++ế	e
++Ề	E
++ề	e
++Ể	E
++ể	e
++Ễ	E
++ễ	e
++Ệ	E
++ệ	e
++Ỉ	I
++ỉ	i
++Ị	I
++ị	i
++Ọ	O
++ọ	o
++Ỏ	O
++ỏ	o
++Ố	O
++ố	o
++Ồ	O
++ồ	o
++Ổ	O
++ổ	o
++Ỗ	O
++ỗ	o
++Ộ	O
++ộ	o
++Ớ	O
++ớ	o
++Ờ	O
++ờ	o
++Ở	O
++ở	o
++Ỡ	O
++ỡ	o
++Ợ	O
++ợ	o
++Ụ	U
++ụ	u
++Ủ	U
++ủ	u
++Ứ	U
++ứ	u
++Ừ	U
++ừ	u
++Ử	U
++ử	u
++Ữ	U
++ữ	u
++Ự	U
++ự	u
++Ỳ	Y
++ỳ	y
++Ỵ	Y
++ỵ	y
++Ỷ	Y
++ỷ	y
++Ỹ	Y
++ỹ	y
+diff --git a/Apps/RomMLibrary/lib/common.sh b/Apps/RomMLibrary/lib/common.sh
+index af1d40e9..deae5a43 100755
+--- a/Apps/RomMLibrary/lib/common.sh
++++ b/Apps/RomMLibrary/lib/common.sh
+@@ -126,18 +126,27 @@ load_settings() {
+ to_real_nl() { printf '%s' "$1" | awk '{ gsub(/\\n/, "\n"); print }'; }
+ to_lit_nl() { printf '%s' "$1" | awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }'; }
+ 
++# O infoscreen (sdl2imgshow) le o texto como Latin-1 e nao quebra linhas; o selector e o teclado leem UTF-8.
++# screen_text converte (acentos viram 1 byte Latin-1, aspas curvas etc. viram ASCII, o resto vira "?")
++# e quebra as linhas longas na largura da tela.  Ver lib/screentext.awk.
++screen_text() { # texto [corpo-da-fonte] -> texto pronto para "infoscreen -m"
++  _st=$(printf '%s\n' "$1" | LC_ALL=C awk -v fs="${2:-30}" -v px=880 -v tbl="$APP_DIR/data/latin1.tsv" \
++    -f "$APP_DIR/lib/screentext.awk" 2>/dev/null | LC_ALL=C tr -c '\11\12\40-\176' '?' | LC_ALL=C tr -s '?')
++  if [ -n "$_st" ]; then printf '%b' "$_st"; else printf '%s' "$1"; fi
++}
++
+ ui_info() { # mostra o texto e segue (a imagem fica na tela)
+-  "$INFOSCREEN" -m "$(to_real_nl "$1")" -fs "${2:-32}" >/dev/null 2>&1
++  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" "${2:-32}")" -fs "${2:-32}" >/dev/null 2>&1
+ }
+ 
+ ui_wait() { # texto [teclas] -> imprime a tecla pressionada
+-  "$INFOSCREEN" -m "$(to_real_nl "$1")" -fs 30 -k "${2:-A B}" 2>/dev/null
++  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" 30)" -fs 30 -k "${2:-A B}" 2>/dev/null
+ }
+ 
+ ui_notice() { ui_wait "$1${NL}${NL}A: $L_OK" "A B" >/dev/null; }
+ 
+ ui_confirm() { # texto -> 0 se A (sim)
+-  _uk=$("$INFOSCREEN" -m "$(to_real_nl "$1")${NL}${NL}A: $L_YES      B: $L_NO" -fs 30 -k "A B" 2>/dev/null)
++  _uk=$("$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")${NL}${NL}A: $L_YES      B: $L_NO" 30)" -fs 30 -k "A B" 2>/dev/null)
+   [ "$_uk" = A ]
+ }
+ 
+diff --git a/Apps/RomMLibrary/lib/download.sh b/Apps/RomMLibrary/lib/download.sh
+index 89c4e6ad..317b8ad5 100755
+--- a/Apps/RomMLibrary/lib/download.sh
++++ b/Apps/RomMLibrary/lib/download.sh
+@@ -47,7 +47,7 @@ dl_run() { # url parcial retomar(0|1) total titulo
+     else
+       _dr_line="$(fmt_size "$_dr_cur")$_dr_speed"
+     fi
+-    _dr_k=$("$INFOSCREEN" -m "$L_DL_PROGRESS${NL}${NL}$_dr_title${NL}${NL}$_dr_line${NL}${NL}$L_DL_CANCEL_HINT" -fs 28 -k B -t 1 2>/dev/null)
++    _dr_k=$("$INFOSCREEN" -m "$(screen_text "$L_DL_PROGRESS${NL}${NL}$_dr_title${NL}${NL}$_dr_line${NL}${NL}$L_DL_CANCEL_HINT" 28)" -fs 28 -k B -t 1 2>/dev/null)
+     if [ "$_dr_k" = B ]; then
+       DL_CANCELLED=1
+       kill "$DL_PID" 2>/dev/null
+diff --git a/Apps/RomMLibrary/lib/screentext.awk b/Apps/RomMLibrary/lib/screentext.awk
+new file mode 100644
+index 00000000..fb24dd75
+--- /dev/null
++++ b/Apps/RomMLibrary/lib/screentext.awk
+@@ -0,0 +1,131 @@
++# RomM Library - screentext.awk: prepara um texto UTF-8 para o infoscreen.
++#
++# O infoscreen chama o sdl2imgshow, que desenha com TTF_RenderText_Solid: o texto e lido como
++# Latin-1 (nao UTF-8) e as linhas nao quebram sozinhas.  Sem tratamento, "nao" com til vira "NÃ£o",
++# titulos com aspas curvas ou macrons viram lixo e linhas longas saem da tela.
++#
++# Entrada (stdin): texto UTF-8, uma linha de tela por linha.
++# Saida: as mesmas linhas, quebradas na largura "px" (estimada para a fonte do tema no tamanho "fs"),
++#        com tudo que nao e ASCII trocado por escapes "\0ooo" (octal, 1 byte Latin-1) ou por ASCII
++#        (aspas curvas, reticencias, macrons...).  O shell converte os escapes com printf %b.
++#        A barra invertida do texto original vira "\0134" para nao ser tomada como escape.
++# Variaveis: -v fs=30 -v px=880 -v tbl=data/latin1.tsv
++# Ao final o que sobrar com byte >= 0x80 (CJK etc.) e trocado por "?" pelo shell (tr).
++# POSIX awk puro (mawk e BusyBox awk): so index/substr/length, nada de gsub com "\" na troca.
++
++BEGIN {
++  if (fs + 0 <= 0) fs = 30
++  if (px + 0 <= 0) px = 880
++  n = 0
++  if (tbl != "") {
++    while ((getline ln < tbl) > 0) {
++      if (ln == "" || substr(ln, 1, 1) == "#") continue
++      t = index(ln, "\t")
++      if (t < 2) continue
++      n++
++      from[n] = substr(ln, 1, t - 1)
++      to[n] = substr(ln, t + 1)
++    }
++    close(tbl)
++  }
++}
++
++# troca todas as ocorrencias de a por b em s (sem regex, sem tratar "\" ou "&" na troca)
++function repl(s, a, b,    out, i, la) {
++  la = length(a)
++  if (la == 0) return s
++  out = ""
++  while ((i = index(s, a)) > 0) {
++    out = out substr(s, 1, i - 1) b
++    s = substr(s, i + la)
++  }
++  return out s
++}
++
++# largura estimada de uma celula, em fracao do corpo da fonte (valores medidos na fonte do tema,
++# arredondados para cima: melhor quebrar um pouco cedo do que cortar a borda da tela)
++function cw(c) {
++  if (c == " ") return 0.26
++  if (length(c) > 1) return 0.62
++  if (index("ijl.,:;'|!()[]I", c) > 0) return 0.36
++  if (index("mMwW%@", c) > 0) return 0.90
++  if (index("0123456789", c) > 0) return 0.56
++  if (index("ABCDEFGHJKLNOPQRSTUVXYZ", c) > 0) return 0.74
++  return 0.60
++}
++
++function enc(s,    out, i, k, ch) {
++  # 1) barra invertida do original
++  out = ""
++  while ((i = index(s, "\\")) > 0) {
++    out = out substr(s, 1, i - 1) "\\0134"
++    s = substr(s, i + 1)
++  }
++  s = out s
++  # 2) Latin-1 / ASCII da tabela (so se houver algo fora do ASCII imprimivel)
++  if (s ~ /[^ -~]/) {
++    for (k = 1; k <= n; k++) {
++      if (index(s, from[k]) > 0) s = repl(s, from[k], to[k])
++    }
++  }
++  return s
++}
++
++# quebra uma linha ja codificada: celulas = 1 caractere ASCII ou 1 escape "\0ooo" (5 caracteres)
++function wrap(s,    i, L, c, m, w, lw, sp, k, out, first, start) {
++  split("", cells)   # esvazia o vetor global (portavel entre mawk e BusyBox awk)
++  L = length(s)
++  m = 0
++  i = 1
++  while (i <= L) {
++    c = substr(s, i, 1)
++    if (c == "\\" && substr(s, i + 1, 1) == "0") { c = substr(s, i, 5); i += 5 } else i++
++    cells[++m] = c
++  }
++  out = ""
++  first = 1
++  lw = 0
++  sp = 0      # posicao (em cells) do ultimo espaco da linha atual
++  k = 1
++  start = 1
++  while (k <= m) {
++    c = cells[k]
++    w = cw(c) * fs
++    if (lw + w > px && k > start) {
++      if (sp > start) {
++        # quebra no ultimo espaco
++        out = out (first ? "" : "\n") join(start, sp - 1)
++        first = 0
++        start = sp + 1
++        k = start
++      } else {
++        # palavra maior que a linha: quebra dura
++        out = out (first ? "" : "\n") join(start, k - 1)
++        first = 0
++        start = k
++      }
++      while (start <= m && cells[start] == " ") start++
++      k = start
++      lw = 0
++      sp = 0
++      continue
++    }
++    if (c == " ") sp = k
++    lw += w
++    k++
++  }
++  out = out (first ? "" : "\n") join(start, m)
++  return out
++}
++
++function join(a, b,    r, i) {
++  r = ""
++  for (i = a; i <= b; i++) r = r cells[i]
++  sub(/ +$/, "", r)     # sem espaco sobrando no fim da linha
++  return r
++}
++
++{
++  sub(/\r$/, "")
++  print wrap(enc($0))
++}
+diff --git a/README.md b/README.md
+index 0f48ea63..1e4ff7f8 100644
+--- a/README.md
++++ b/README.md
+@@ -31,7 +31,7 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
+ | **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
+ | **Correção do travamento do RetroArch** | `trimui/app/trimui_inputd`, `System/resources/tsp_inputd`/`tsps_inputd`, `scripts/inputd-disable-ff.py` | O RetroArch travava no "loading" porque o daemon de entrada do TSP anuncia vibração (force feedback) mas nunca responde ao pedido do SDL. O patch troca 8 instruções para o controle virtual deixar de anunciar FF; o resto do daemon fica igual. Detalhes e limites: seção 8 do registro histórico |
+ | **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S e, se travar em vibração, qual dispositivo e quem segura `/dev/uinput`). Não altera o comportamento do RetroArch |
+-| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (109 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
++| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (124 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
+ | **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
+ 
+ **Instalar este fork no cartão:**
+diff --git a/docs/HISTORICO-2026-11-22.md b/docs/HISTORICO-2026-11-22.md
+index 896db831..4ef51e91 100644
+--- a/docs/HISTORICO-2026-11-22.md
++++ b/docs/HISTORICO-2026-11-22.md
+@@ -94,7 +94,7 @@ As três branches nascem do `d5102fab` (JukaMix), **não** da `main`. Para unir
+ 
+ ## 7. Limitações e pendências
+ 
+-- **Nada foi testado em hardware real.** Os testes são simulações (109 + 35 + 44 + 24 + 8 checagens); o
++- **Nada foi testado em hardware real.** Os testes são simulações (124 + 35 + 44 + 24 + 8 checagens); o
+   daemon de entrada corrigido só foi verificado por comparação de bytes e disassembly, não executado.
+ - **RetroArch preso na tela de loading** ao abrir por Apps → RetroArch (relatado em 2026-11-22):
+   causa identificada, correção entregue e **confirmada no aparelho pelo usuário em 2026-11-23**
+@@ -263,3 +263,39 @@ Conferida a lista, o mesmo comando com `| Remove-Item -WhatIf` mostra o que seri
+ `-WhatIf` apaga de fato. As fontes `NotoSans*-Regular.ttf` dentro de
+ `Apps\PortMaster\PortMaster\themes\<tema>\` também podem ser apagadas à mão; extrair o pacote novo
+ por cima não as recria.
++
++## 10. RomM Library no aparelho: texto das telas de download e de aviso (2026-11-23/24)
++
++**Relato do usuário:** o app "rodou perfeitamente"; só as fontes na hora do download e nas mensagens de
++aviso ficavam "bem bagunçadas". As fontes dos menus (mesmo pequenas) estavam ok.
++
++**Causa provável** (por leitura do código e dos binários; não vi a tela do aparelho):
++
++- Menus, lista de jogos e teclado usam `selector`/`VirtualKeyboard`, que leem UTF-8: ok.
++- Download e avisos usam `infoscreen.sh`, que chama `System/bin/sdl2imgshow`. Esse binário (14,9 KB)
++  importa só `TTF_RenderText_Solid`: o texto é lido como **Latin-1**, não UTF-8, e não há chamada de
++  quebra de linha. Efeito: com a interface em português, "não" saía como "NÃ£o", e aspas curvas,
++  reticências e títulos com macron ou caracteres japoneses viravam lixo; linhas longas passavam da
++  borda da tela.
++- A interface em inglês (ASCII) não sofria do problema dos acentos, mas os títulos dos jogos
++  continuavam podendo ter caracteres fora do ASCII.
++
++**Correção** (`Apps/RomMLibrary/lib/screentext.awk`, `data/latin1.tsv`, `screen_text` em `lib/common.sh`,
++usada por `ui_info`, `ui_wait`, `ui_confirm` e pela tela de progresso do download):
++
++- U+00A0–U+00FF viram 1 byte Latin-1 (acentos corretos na tela).
++- Aspas curvas, travessões, reticências, `™`, `€` e setas viram ASCII; macrons, carons e afins
++  (U+0100–U+024F, U+1E00–U+1EFF) viram a letra base; o que sobrar (japonês, chinês…) vira um `?`.
++- Linhas são quebradas por palavras na largura de 880 px estimada com a fonte do tema
++  (`wqy-microhei.ttf`, larguras medidas por classe de caractere e arredondadas para cima); palavra maior
++  que a tela sofre quebra dura. Se o awk falhar, o texto original é mostrado como antes.
++- Medição com a fonte real (Pillow): a maior linha dos casos de teste mede 860 px; a tela do Brick tem
++  1024 px e a do TSP 1280.
++
++**Testes:** `tests/romm_library/run.sh` passou de 109 para 124 checagens. O mock do `infoscreen` agora
++guarda os bytes exatos recebidos (`info.raw`) e o texto lido como UTF-8 (`info.log`); sem a correção, 5
++checagens de ponta a ponta falham (provado com o código antigo).
++
++**Limites:** os escapes são convertidos com `printf %b` e `tr` do BusyBox, o awk é o do BusyBox; só
++rodei com `dash` e `mawk`. A estimativa de largura é conservadora, não exata. Se ainda aparecer algo
++estranho, uma foto da tela mostra se o problema restante é de largura, de fonte ou de outro texto.
+diff --git a/tests/romm_library/mocks/infoscreen.sh b/tests/romm_library/mocks/infoscreen.sh
+index 9f16e435..7817b928 100755
+--- a/tests/romm_library/mocks/infoscreen.sh
++++ b/tests/romm_library/mocks/infoscreen.sh
+@@ -6,7 +6,13 @@ msg=""; keys=""
+ while [ $# -gt 0 ]; do
+   case "$1" in -m) msg=$2; shift 2 ;; -k) keys=$2; shift 2 ;; -t | -fs | -i | -c | -ff) shift 2 ;; *) shift ;; esac
+ done
+-printf '%s\n----\n' "$msg" >>"$D/info.log"
++# info.raw = bytes exatamente como chegam ao sdl2imgshow (Latin-1); info.log = o mesmo texto lido como UTF-8
++printf '%s\n----\n' "$msg" >>"$D/info.raw"
++if command -v iconv >/dev/null 2>&1; then
++  printf '%s\n----\n' "$msg" | iconv -f ISO-8859-1 -t UTF-8 >>"$D/info.log"
++else
++  printf '%s\n----\n' "$msg" >>"$D/info.log"
++fi
+ [ -n "$keys" ] || exit 0
+ if [ "$keys" = B ]; then
+   sleep 0.3
+diff --git a/tests/romm_library/run.sh b/tests/romm_library/run.sh
+index 80e67539..4ff34357 100755
+--- a/tests/romm_library/run.sh
++++ b/tests/romm_library/run.sh
+@@ -108,6 +108,37 @@ if scenario "unit"; then
+   eq "sanitize: so pontos" "$(SH 'dl_sanitize "..."')" "rom"
+   eq "sanitize: barra invertida" "$(SH 'dl_sanitize "a\\b|c*d"')" "a_b_c_d"
+ 
++  # ---- texto do infoscreen: sdl2imgshow le Latin-1 (TTF_RenderText_Solid) e nao quebra linhas
++  hex_of() { od -An -v -tx1 | tr -d ' \n'; }
++  eq "screen_text: acentos viram 1 byte Latin-1" "$(SH 'screen_text "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
++  eq "screen_text: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'screen_text "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
++  eq "screen_text: macron vira a letra base" "$(SH 'screen_text "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
++  eq "screen_text: CJK vira um unico ?" "$(SH 'screen_text "ドラゴンクエスト"')" "?"
++  eq "screen_text: barra invertida e % ficam como estao" "$(SH 'screen_text "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
++  eq "screen_text: texto ASCII curto nao muda" "$(SH 'screen_text "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s" 28')" "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s"
++  eq "screen_text: linha em branco e quebra real preservadas" "$(SH 'screen_text "Baixando
++
++Jogo"')" "$(printf 'Baixando\n\nJogo')"
++  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
++  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "$_long")
++  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_text: linha longa e quebrada em varias" || bad "screen_text: linha longa nao quebrou"
++  eq "screen_text: quebrar nao perde nem troca palavras" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | iconv -f UTF-8 -t ISO-8859-1 | hex_of)"
++  _lw=$(printf '%s\n' "$_wr" | awk '{ if (length($0) > m) m = length($0) } END { print m }')
++  [ "$_lw" -le 60 ] && ok "screen_text: nenhuma linha passa de 60 caracteres ($_lw)" || bad "screen_text: linha com $_lw caracteres"
++  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
++  [ "$(printf '%s\n' "$_wr2" | wc -l)" -ge 2 ] && ok "screen_text: palavra maior que a tela sofre quebra dura" || bad "screen_text: palavra gigante nao quebrou"
++  # largura real na fonte do tema (so com Pillow)
++  if python3 -c 'import PIL' 2>/dev/null; then
++    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "O servidor não tem plataformas com jogos (ou seu usuário não pode vê-las). Confira o login." "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do screen_text "$t" 30; printf "\036"; done')
++    _mx=$(printf '%s' "$_ww" | python3 -I -c '
++import sys
++from PIL import ImageFont
++f = ImageFont.truetype(sys.argv[1], 30)
++raw = sys.stdin.buffer.read().decode("latin-1")
++print(int(max(f.getlength(l) for blk in raw.split("\x1e") for l in blk.split("\n") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
++    [ "$_mx" -le 1000 ] && ok "screen_text: maior linha mede $_mx px na fonte do tema (tela do Brick: 1024)" || bad "screen_text: linha de $_mx px passa da tela"
++  fi
++
+   eq "urlenc UTF-8 + simbolos" "$(SH 'urlenc "Pokémon: Emerald & Co. (USA).gba"')" "Pok%C3%A9mon%3A%20Emerald%20%26%20Co.%20%28USA%29.gba"
+   eq "fmt_size 0" "$(SH 'fmt_size 0')" "0 B"
+   eq "fmt_size KB" "$(SH 'fmt_size 1536')" "2 KB"
+@@ -287,6 +318,8 @@ if scenario "e2e-flaky-resume"; then
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"
+   run_app
+   check "queda detectada e explicada" grep -q "A conexão caiu" "$M/info.log"
++  check "infoscreen recebeu 'conexão' em Latin-1 (1 byte), nao em UTF-8" env LC_ALL=C grep -q "A conex$(printf '\343')o caiu" "$M/info.raw"
++  check "nenhum acento UTF-8 chegou ao infoscreen" bash -c "! LC_ALL=C grep -q \"$(printf '\303\243')\" '$M/info.raw'"
+   check "servidor derrubou a conexao no meio" grep -q "DROPPED-HALFWAY" "$REQLOG"
+   check "segunda tentativa retomou com Range" grep -Eq "range-from=[1-9][0-9]*" "$REQLOG"
+   eq "arquivo final identico apos retomar" "$(sha_file "$SD/Roms/GBA/Big Flaky Adventure.gba" 2>/dev/null)" "$(sha_of 3)"
+@@ -359,6 +392,7 @@ if scenario "e2e-nospace"; then
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para"
+   MOCK_FREE_KB=100 run_app
+   check "avisa falta de espaco" grep -q "Sem espaço livre" "$M/info.log"
++  check "falta de espaco: 'espaço' chegou em Latin-1" env LC_ALL=C grep -q "espa$(printf '\347')o" "$M/info.raw"
+   check "nada gravado" sh -c "[ -z \"\$(find '$SD/Roms' -type f)\" ]"
+   end_scenario
+ fi
+-- 
+2.43.0
+

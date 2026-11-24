@@ -56,11 +56,12 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 
 | Arquivo | Para quê |
 |---|---|
-| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (26 arquivos). |
+| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto da seção 10 (a versão anterior tinha 26 arquivos); por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
 | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
 | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
 | `RetroArch-probe-sdcard.zip` | **Substituído pelo `RetroArch-fix-sdcard.zip`.** Primeira versão da sonda (troca `Apps/RetroArch/launch.sh` e acrescenta `ra_probe.sh`). Guardado só para registro. |
 | `RetroArch-fix-sdcard.zip` | Extrair na raiz do cartão (5 arquivos): daemon de entrada sem o anúncio de vibração (`trimui/app/trimui_inputd`, `System/resources/tsp_inputd` e `tsps_inputd`), sonda corrigida (`ra_probe.sh`) e `Apps/RetroArch/launch.sh`. Seção 8. |
+| `romm-library-text.patch` | Patch git do commit da seção 10 (texto das telas de download e aviso), `git am` depois dos anteriores. |
 | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
 | `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
 | `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até a correção do RetroArch (`1741df2e`, ref `HEAD`; requer `d5102fab`). Não contém o commit que adiciona os arquivos de `releases/`. |
