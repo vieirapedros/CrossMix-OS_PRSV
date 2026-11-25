@@ -61,7 +61,7 @@ screen_game() { # usa R_*
       [ "$_sg_rc" = 0 ] && return 0
     elif [ "$_sg_ndel" != 0 ] && [ "$_sg_k" = "$_sg_ndel" ]; then
       _sg_sum=$(rom_del_summary "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")
-      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES"; then
+      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES" "$L_DEL_YES"; then
         rom_delete_do "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI"
         ui_notice "$DEL_MSG${NL}$R_NAME"
       fi
@@ -304,10 +304,11 @@ screen_settings() {
     _ss_srv=$(cfg_get base_url)
     if [ -n "$(cfg_get token)" ]; then _ss_login="$L_S_LOGIN_TOKEN"; else _ss_login=$(cfg_get username); fi
     if [ "$(cfg_get insecure)" = 1 ]; then _ss_ins="$L_ON"; else _ss_ins="$L_OFF"; fi
+    case "$UI_ENC" in utf8) _ss_enc="UTF-8" ;; latin1) _ss_enc="Latin-1" ;; *) _ss_enc="?" ;; esac
     _ss_c=$(ui_choose "$L_SETTINGS  ($L_BACK_HINT)" \
       "1. $L_S_SERVER: $_ss_srv" "2. $L_S_LOGIN: $_ss_login" "3. $L_S_TEST" \
       "4. $L_S_PAGE: $PAGE_SIZE" "5. $L_S_LANG: $LANG_UI" "6. $L_S_INSECURE: $_ss_ins" \
-      "7. $L_S_FOLDERS" "8. $L_S_PARTS" "9. $L_S_ABOUT")
+      "7. $L_S_FOLDERS" "8. $L_S_PARTS" "9. $L_S_ENC: $_ss_enc" "10. $L_S_ABOUT")
     case "$(choice_num "$_ss_c")" in
     1) ask_server && settings_test ;;
     2) ask_auth && settings_test ;;
@@ -338,7 +339,8 @@ screen_settings() {
       _ss_k=$(dl_clean_parts)
       if [ "$_ss_k" = 0 ]; then ui_notice "$L_PARTS_NONE"; else ui_notice "$L_PARTS_DONE $_ss_k"; fi
       ;;
-    9) screen_about ;;
+    9) calibrate_encoding ;;
+    10) screen_about ;;
     *) return 0 ;;
     esac
   done
@@ -372,6 +374,8 @@ app_main() {
     log "config.json invalido: guardado como config.json.bad"
   fi
   load_settings
+  # primeira vez: descobrir como o selector desenha acentos (Latin-1 ou UTF-8); B pula e pergunta de novo na proxima
+  [ -n "$UI_ENC" ] || calibrate_encoding
   if [ -z "$(cfg_get base_url)" ]; then
     wizard || return 0
   fi

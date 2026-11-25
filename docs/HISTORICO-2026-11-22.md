@@ -56,13 +56,14 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 
 | Arquivo | Para quê |
 |---|---|
-| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto (seção 10) e a opção Excluir (seção 11); a versão original tinha 26 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
+| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto (seções 10 e 12) e a opção Excluir (seção 11); a versão original tinha 26 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
 | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
 | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
 | `RetroArch-probe-sdcard.zip` | **Substituído pelo `RetroArch-fix-sdcard.zip`.** Primeira versão da sonda (troca `Apps/RetroArch/launch.sh` e acrescenta `ra_probe.sh`). Guardado só para registro. |
 | `RetroArch-fix-sdcard.zip` | Extrair na raiz do cartão (5 arquivos): daemon de entrada sem o anúncio de vibração (`trimui/app/trimui_inputd`, `System/resources/tsp_inputd` e `tsps_inputd`), sonda corrigida (`ra_probe.sh`) e `Apps/RetroArch/launch.sh`. Seção 8. |
 | `romm-library-text.patch` | Patch git do commit da seção 10 (texto das telas de download e aviso), `git am` depois dos anteriores. |
 | `romm-library-delete.patch` | Patch git do commit da seção 11 (opção "Excluir do cartão SD"), `git am` depois do anterior. |
+| `romm-library-ui.patch` | Patch git do commit da seção 12 (avisos e confirmações pelo `selector`, progresso em uma linha, calibração dos acentos), `git am` depois do anterior. |
 | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
 | `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
 | `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até a correção do RetroArch (`1741df2e`, ref `HEAD`; requer `d5102fab`). Não contém o commit que adiciona os arquivos de `releases/`. |
@@ -268,6 +269,10 @@ por cima não as recria.
 
 ## 10. RomM Library no aparelho: texto das telas de download e de aviso (2026-11-23/24)
 
+> **Superada em parte pela seção 12.** A conversão para Latin-1 (acentos) continua valendo, mas a ideia de
+> quebrar o texto em várias linhas no `infoscreen` estava errada: ele só desenha uma linha, e cada quebra
+> virava um quadradinho. Isso apareceu nas fotos do aparelho de 2026-11-24.
+
 **Relato do usuário:** o app "rodou perfeitamente"; só as fontes na hora do download e nas mensagens de
 aviso ficavam "bem bagunçadas". As fontes dos menus (mesmo pequenas) estavam ok.
 
@@ -310,7 +315,7 @@ pelo menu do RomM.
 **O que foi feito** (`lib/download.sh`, `lib/screens.sh`, `lib/i18n.sh`):
 
 - Tela do jogo: quando ele está no cartão, o menu ganha "Excluir do cartão SD" (a numeração se ajusta;
-  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (A: sim, B: não) mostrando até 3
+  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (a partir da seção 12, um menu "Não" / "Sim, excluir"; antes era A/B no `infoscreen`) mostrando até 3
   nomes, quantos itens a mais e o tamanho total, e avisa que saves e estados **não** são apagados.
 - Para só apagar o que o app baixou, cada download passa a gravar `Data/romm/dl/<id>.lst` (linhas
   `pasta<TAB>item`, item = arquivo ou pasta direto dentro de `Roms/<pasta>/`). Vale também para jogos
@@ -331,3 +336,43 @@ na lista, saves e outro jogo na mesma pasta intactos).
 
 **Limites:** testado só em simulação (`dash`, `mawk`, `du`/`sort` do ambiente de teste), não no
 aparelho. Não apaga imagens/metadados que o scraper do JukaMix tenha gerado para o jogo.
+
+## 12. RomM Library: as letras ainda estavam ruins; avisos e progresso refeitos (2026-11-24)
+
+**Relato do usuário (3 fotos do aparelho):** "As letras seguem ruins." As fotos mostram a tela de progresso
+do download e os avisos com quadradinhos (⊠) em cada quebra de linha, frases longas numa linha só saindo
+pela borda e texto cortado. Os acentos já estavam certos.
+
+**Causa real:** o `infoscreen` (`sdl2imgshow`) faz **uma única** chamada `TTF_RenderText_Solid`. Ele só
+desenha uma linha: `\n` vira um quadradinho e nada quebra nem corta. A seção 10 supôs o contrário e
+acrescentou quebras de linha, que só pioraram. Quem desenha vários parágrafos é o `selector` (o título lê
+`\n`, uma linha por vez).
+
+**Correção** (`lib/common.sh`, `lib/screentext.awk`, `lib/download.sh`, `lib/platforms.sh`, `lib/screens.sh`,
+`lib/i18n.sh`):
+
+- **Progresso do download:** uma linha só no `infoscreen`: `título... - 45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar`.
+  O título é cortado com `...` na largura da tela (1150 px; 900 px no Brick) e o final (porcentagem, tamanho,
+  velocidade e dica) nunca é cortado. O rótulo "Baixando" saiu para sobrar espaço.
+- **Avisos** (`ui_notice`, `ui_wait`): viraram um menu do `selector` com um item "OK" e o texto no título,
+  quebrado por palavra em cerca de 57 caracteres (`screen_wrap`). A confirmação de exclusão (`ui_confirm`)
+  é um menu "Não" (item inicial) / "Sim, excluir".
+- **Frases curtas** ("Carregando...", "Conectando..."): `ui_info` continua no `infoscreen`, mas junta tudo
+  numa linha só.
+- **Seletor de pasta** (`plat_ask_folder`): itens numerados (`3. GBA`) e a pasta vem pelo número.
+- **Acentos no `selector`:** o binário sugere Latin-1 (`TTF_RenderText_*` não decodifica UTF-8), mas você
+  disse que os menus estavam ok mandando UTF-8, e eu não consigo testar no aparelho. Em vez de adivinhar,
+  na primeira abertura o app mostra duas linhas (`ação coração você`) em cada codificação e você escolhe
+  a que aparece certa; o resultado vai para `ui_encoding` no `config.json` (`latin1` ou `utf8`). **B** pula
+  e pergunta de novo na próxima vez. *Configurações → Acentos na tela* refaz a escolha. O texto devolvido
+  pelo `selector` é trocado de volta pelo original (UTF-8), então as comparações das telas não mudam.
+
+**Testes:** `tests/romm_library/run.sh` foi de 159 para 182 checagens: `screen_line` (uma linha, fim
+preservado, `...`, largura medida com Pillow na fonte do tema: ≤ 1280 px e, com 900 px, ≤ 1024 px),
+`screen_wrap` (UTF-8 intacto, ≤ 62 caracteres, palavras preservadas), conversão Latin-1, e a calibração
+(escolher UTF-8, escolher Latin-1, B, refazer pelas Configurações, bytes recebidos pelo `selector`
+conferidos). O mock do `selector` registra os bytes (`sel.raw`) e trata um menu de um item "OK" como aviso.
+
+**Limites:** nada disso foi rodado no aparelho: só `dash` e `mawk` aqui, não o `ash`/`awk` do BusyBox. A
+largura é uma estimativa conservadora com a fonte do tema (no Brick, 900 px é um palpite). Se alguma tela
+ainda sair torta, uma foto diz se é largura, fonte ou codificação.

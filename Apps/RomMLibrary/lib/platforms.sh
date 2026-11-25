@@ -32,12 +32,20 @@ plat_ask_folder() { # pid slug fs_slug -> pasta escolhida (lembrada) ou vazio
     [ -d "$_pd" ] || continue
     basename "$_pd" >>"$_pa"
   done
+  # itens numerados ("3. GBA"): o texto do menu passa por conversao de encoding, entao a pasta vem pelo numero
+  _pn=0
   set --
   while IFS= read -r _pl; do
-    [ -n "$_pl" ] && set -- "$@" "$_pl"
+    [ -n "$_pl" ] || continue
+    _pn=$((_pn + 1))
+    set -- "$@" "$_pn. $_pl"
   done <"$_pa"
   [ "$#" -gt 0 ] || return 1
   _pc=$(ui_choose "$L_ASK_FOLDER" "$@")
+  [ -n "$_pc" ] || return 1
+  _pn=$(choice_num "$_pc")
+  case "$_pn" in '' | *[!0-9]*) return 1 ;; esac
+  _pc=$(sed -n "${_pn}p" "$_pa")
   [ -n "$_pc" ] || return 1
   [ -d "$ROMS_DIR/$_pc" ] || return 1
   map_set "$_pak" "$_pc"

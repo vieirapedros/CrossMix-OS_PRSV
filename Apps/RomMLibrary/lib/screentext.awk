@@ -1,23 +1,29 @@
-# RomM Library - screentext.awk: prepara um texto UTF-8 para o infoscreen.
+# RomM Library - screentext.awk: prepara texto UTF-8 para os programas de tela do sistema.
 #
-# O infoscreen chama o sdl2imgshow, que desenha com TTF_RenderText_Solid: o texto e lido como
-# Latin-1 (nao UTF-8) e as linhas nao quebram sozinhas.  Sem tratamento, "nao" com til vira "NÃ£o",
-# titulos com aspas curvas ou macrons viram lixo e linhas longas saem da tela.
+# Os dois desenham com TTF_RenderText_Solid/Blended, que leem o texto como Latin-1 (nao UTF-8):
+#   - infoscreen (sdl2imgshow): desenha UMA linha so.  Quebra de linha vira o quadradinho "sem glifo" e o
+#     que passa da largura sai da tela.  Entao: tudo numa linha, cortado com "..." para caber.
+#   - selector (menus, titulos, avisos): aceita varias linhas no titulo, mas tambem le Latin-1.
 #
-# Entrada (stdin): texto UTF-8, uma linha de tela por linha.
-# Saida: as mesmas linhas, quebradas na largura "px" (estimada para a fonte do tema no tamanho "fs"),
-#        com tudo que nao e ASCII trocado por escapes "\0ooo" (octal, 1 byte Latin-1) ou por ASCII
-#        (aspas curvas, reticencias, macrons...).  O shell converte os escapes com printf %b.
-#        A barra invertida do texto original vira "\0134" para nao ser tomada como escape.
-# Variaveis: -v fs=30 -v px=880 -v tbl=data/latin1.tsv
-# Ao final o que sobrar com byte >= 0x80 (CJK etc.) e trocado por "?" pelo shell (tr).
+# Modos (-v mode=):
+#   conv  converte linha a linha, sem quebrar nem juntar  (itens e titulos do selector)
+#   line  junta todas as linhas em UMA ("a - b - c"), converte e corta com "..." na largura px; com
+#         -v tail=TEXTO anexa " - TEXTO" ao fim, que nunca e cortado  (infoscreen)
+#   wrap  NAO converte (continua UTF-8): so quebra as linhas por palavra na largura px  (avisos no selector)
+#
+# Conversao (conv e line): U+00A0..FF viram \0ooo (octal, 1 byte Latin-1; o shell converte com printf %b);
+#   pontuacao tipografica e letras latinas fora do Latin-1 viram ASCII (data/latin1.tsv); a barra
+#   invertida do texto vira \0134.  O que sobrar com byte >= 0x80 (CJK...) o shell troca por "?" (tr).
+# Variaveis: -v fs=30 -v px=880 -v tbl=data/latin1.tsv [-v tail=...]
 # POSIX awk puro (mawk e BusyBox awk): so index/substr/length, nada de gsub com "\" na troca.
 
 BEGIN {
   if (fs + 0 <= 0) fs = 30
   if (px + 0 <= 0) px = 880
+  if (mode == "") mode = "conv"
+  ns = 0
   n = 0
-  if (tbl != "") {
+  if (mode != "wrap" && tbl != "") {
     while ((getline ln < tbl) > 0) {
       if (ln == "" || substr(ln, 1, 1) == "#") continue
       t = index(ln, "\t")
@@ -43,7 +49,7 @@ function repl(s, a, b,    out, i, la) {
 }
 
 # largura estimada de uma celula, em fracao do corpo da fonte (valores medidos na fonte do tema,
-# arredondados para cima: melhor quebrar um pouco cedo do que cortar a borda da tela)
+# arredondados para cima: melhor quebrar/cortar um pouco cedo do que sair da borda da tela)
 function cw(c) {
   if (c == " ") return 0.26
   if (length(c) > 1) return 0.62
@@ -54,7 +60,7 @@ function cw(c) {
   return 0.60
 }
 
-function enc(s,    out, i, k, ch) {
+function enc(s,    out, i, k) {
   # 1) barra invertida do original
   out = ""
   while ((i = index(s, "\\")) > 0) {
@@ -71,40 +77,80 @@ function enc(s,    out, i, k, ch) {
   return s
 }
 
-# quebra uma linha ja codificada: celulas = 1 caractere ASCII ou 1 escape "\0ooo" (5 caracteres)
-function wrap(s,    i, L, c, m, w, lw, sp, k, out, first, start) {
-  split("", cells)   # esvazia o vetor global (portavel entre mawk e BusyBox awk)
+# separa s em celulas (arr): 1 caractere ou, se tok, 1 escape "\0ooo" (5 caracteres). Devolve o numero.
+function cells_of(s, arr, tok,    i, L, c, m) {
+  split("", arr)
   L = length(s)
   m = 0
   i = 1
   while (i <= L) {
     c = substr(s, i, 1)
-    if (c == "\\" && substr(s, i + 1, 1) == "0") { c = substr(s, i, 5); i += 5 } else i++
-    cells[++m] = c
+    if (tok && c == "\\" && substr(s, i + 1, 1) == "0") { c = substr(s, i, 5); i += 5 } else i++
+    arr[++m] = c
   }
+  return m
+}
+
+function join(arr, a, b,    r, i) {
+  r = ""
+  for (i = a; i <= b; i++) r = r arr[i]
+  sub(/ +$/, "", r)     # sem espaco sobrando no fim da linha
+  return r
+}
+
+# largura estimada, em px, de um texto ja codificado
+function width(s,    m, i, w) {
+  m = cells_of(s, wc, 1)
+  w = 0
+  for (i = 1; i <= m; i++) w += cw(wc[i]) * fs
+  return w
+}
+
+# corta s (ja codificado) para caber em maxpx, terminando em "..." se precisou cortar
+function fit(s, maxpx,    m, i, w, ell, out) {
+  if (width(s) <= maxpx) return s
+  m = cells_of(s, fc, 1)
+  ell = 3 * cw(".") * fs
+  w = 0
+  out = ""
+  for (i = 1; i <= m; i++) {
+    w += cw(fc[i]) * fs
+    if (w + ell > maxpx) break
+    out = out fc[i]
+  }
+  sub(/ +$/, "", out)
+  return out "..."
+}
+
+# quebra uma linha por palavra na largura px.  No modo wrap (tok=0) o texto e UTF-8: uma palavra maior que a
+# linha NAO e partida (cortaria um caractere ao meio); ela so passa da largura.
+function wrap(s, tok,    m, k, start, lw, sp, w, c, out, first) {
+  m = cells_of(s, ca, tok)
   out = ""
   first = 1
   lw = 0
-  sp = 0      # posicao (em cells) do ultimo espaco da linha atual
-  k = 1
+  sp = 0      # posicao (em celulas) do ultimo espaco da linha atual
   start = 1
+  k = 1
   while (k <= m) {
-    c = cells[k]
+    c = ca[k]
     w = cw(c) * fs
     if (lw + w > px && k > start) {
       if (sp > start) {
-        # quebra no ultimo espaco
-        out = out (first ? "" : "\n") join(start, sp - 1)
+        out = out (first ? "" : "\n") join(ca, start, sp - 1)
         first = 0
         start = sp + 1
         k = start
-      } else {
-        # palavra maior que a linha: quebra dura
-        out = out (first ? "" : "\n") join(start, k - 1)
-        first = 0
-        start = k
+        lw = 0
+        sp = 0
+        continue
       }
-      while (start <= m && cells[start] == " ") start++
+      # sem onde quebrar antes: deixa a palavra passar ate o proximo espaco
+      while (k <= m && ca[k] != " ") { lw += cw(ca[k]) * fs; k++ }
+      if (k > m) break
+      out = out (first ? "" : "\n") join(ca, start, k - 1)
+      first = 0
+      start = k + 1
       k = start
       lw = 0
       sp = 0
@@ -114,18 +160,32 @@ function wrap(s,    i, L, c, m, w, lw, sp, k, out, first, start) {
     lw += w
     k++
   }
-  out = out (first ? "" : "\n") join(start, m)
+  out = out (first ? "" : "\n") join(ca, start, m)
   return out
-}
-
-function join(a, b,    r, i) {
-  r = ""
-  for (i = a; i <= b; i++) r = r cells[i]
-  sub(/ +$/, "", r)     # sem espaco sobrando no fim da linha
-  return r
 }
 
 {
   sub(/\r$/, "")
-  print wrap(enc($0))
+  if (mode == "wrap") {
+    print wrap($0, 0)
+  } else if (mode == "line") {
+    if ($0 ~ /[^ \t]/) seg[++ns] = $0
+  } else {
+    print enc($0)
+  }
+}
+
+END {
+  if (mode == "line") {
+    main = ""
+    for (i = 1; i <= ns; i++) main = main (i > 1 ? " - " : "") seg[i]
+    main = enc(main)
+    te = enc(tail)
+    avail = px
+    if (te != "") avail = px - width(" - " te)
+    if (avail < 4 * fs) avail = 4 * fs
+    out = fit(main, avail)
+    if (te != "") out = (out != "" ? out " - " : "") te
+    print out
+  }
 }

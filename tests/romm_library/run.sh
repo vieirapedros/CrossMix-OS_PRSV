@@ -47,10 +47,12 @@ new_sd() {
   : >"$M/sel.q"; : >"$M/vk.q"; : >"$M/info.q"; : >"$M/prog.q"
   APPLOG=$SD/System/logs/romm_library.log
   CFGF=$SD/Data/romm/config.json
+  # config ja "calibrada" (acentos em Latin-1), para as telas nao pararem na pergunta de calibracao
+  mkdir -p "$SD/Data/romm"; printf '{"ui_encoding":"latin1"}\n' >"$CFGF"
 }
 q() { local f=$M/$1.q; shift; printf '%s\n' "$@" >>"$f"; }
 write_cfg() { mkdir -p "$SD/Data/romm"; printf '%s\n' "$1" >"$SD/Data/romm/config.json"; }
-cfg_token() { write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"; }
+cfg_token() { write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"; }
 run_app() {
   env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY NO_PROXY='*' ROMM_CONNECT_TIMEOUT=2 \
     ROMM_SDCARD="$SD" MOCK_DIR="$M" ${MOCK_FREE_KB:+MOCK_FREE_KB=$MOCK_FREE_KB} \
@@ -69,7 +71,7 @@ sha_file() { sha256sum "$1" | cut -d' ' -f1; }
 dump() {
   echo "    ---- diagnostico ----"
   for f in "$M/sel.log" "$M/info.log" "$M/vk.log" "$M/errors.log" "$APPLOG" "${REQLOG:-/dev/null}" "$M/out.txt"; do
-    [ -s "$f" ] && { echo "    >> $(basename "$f")"; tail -n 25 "$f" | sed 's/^/       /'; }
+    [ -s "$f" ] && { echo "    >> $(basename "$f")"; tail -n "${DUMPN:-25}" "$f" | sed 's/^/       /'; }
   done
 }
 scenario() { # nome -> 0 se deve rodar
@@ -108,35 +110,67 @@ if scenario "unit"; then
   eq "sanitize: so pontos" "$(SH 'dl_sanitize "..."')" "rom"
   eq "sanitize: barra invertida" "$(SH 'dl_sanitize "a\\b|c*d"')" "a_b_c_d"
 
-  # ---- texto do infoscreen: sdl2imgshow le Latin-1 (TTF_RenderText_Solid) e nao quebra linhas
+  # ---- texto na tela: infoscreen e selector leem Latin-1 (nao UTF-8); o infoscreen so desenha UMA linha
   hex_of() { od -An -v -tx1 | tr -d ' \n'; }
-  eq "screen_text: acentos viram 1 byte Latin-1" "$(SH 'screen_text "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
-  eq "screen_text: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'screen_text "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
-  eq "screen_text: macron vira a letra base" "$(SH 'screen_text "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
-  eq "screen_text: CJK vira um unico ?" "$(SH 'screen_text "ドラゴンクエスト"')" "?"
-  eq "screen_text: barra invertida e % ficam como estao" "$(SH 'screen_text "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
-  eq "screen_text: texto ASCII curto nao muda" "$(SH 'screen_text "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s" 28')" "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s"
-  eq "screen_text: linha em branco e quebra real preservadas" "$(SH 'screen_text "Baixando
+  eq "to_latin1: acentos viram 1 byte Latin-1" "$(SH 'to_latin1 "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
+  eq "to_latin1: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'to_latin1 "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
+  eq "to_latin1: macron vira a letra base" "$(SH 'to_latin1 "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
+  eq "to_latin1: CJK vira um unico ?" "$(SH 'to_latin1 "ドラゴンクエスト"')" "?"
+  eq "to_latin1: barra invertida e % ficam como estao" "$(SH 'to_latin1 "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
+  eq "to_latin1: linha em branco e quebra real preservadas" "$(SH 'to_latin1 "Baixando
 
 Jogo"')" "$(printf 'Baixando\n\nJogo')"
-  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
-  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "$_long")
-  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_text: linha longa e quebrada em varias" || bad "screen_text: linha longa nao quebrou"
-  eq "screen_text: quebrar nao perde nem troca palavras" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | iconv -f UTF-8 -t ISO-8859-1 | hex_of)"
-  _lw=$(printf '%s\n' "$_wr" | awk '{ if (length($0) > m) m = length($0) } END { print m }')
-  [ "$_lw" -le 60 ] && ok "screen_text: nenhuma linha passa de 60 caracteres ($_lw)" || bad "screen_text: linha com $_lw caracteres"
-  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
-  [ "$(printf '%s\n' "$_wr2" | wc -l)" -ge 2 ] && ok "screen_text: palavra maior que a tela sofre quebra dura" || bad "screen_text: palavra gigante nao quebrou"
+  eq "ui_text: ui_encoding=utf8 nao converte nada" "$(SH 'UI_ENC=utf8; ui_text "Não é"' | hex_of)" "$(printf 'Não é' | hex_of)"
+
+  eq "screen_line: ASCII curto + fim" "$(SH 'screen_line "Zelda" 26 "45%  -  B: parar"')" "Zelda - 45%  -  B: parar"
+  eq "screen_line: acento em 1 byte Latin-1" "$(SH 'screen_line "Pokémon" 26' | hex_of)" "$(printf 'Pok\351mon' | hex_of)"
+  eq "screen_line: varias linhas viram UMA (sem quebra de linha)" "$(SH 'screen_line "Um
+Dois
+
+Tres" 26' | wc -l | tr -d ' ')" "0"
+  _lt="THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST EDITION WITH A VERY LONG NAME INDEED"
+  _lo=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_line "$1" 26 "45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar"' sh "$_lt")
+  check "screen_line: titulo longo e cortado com ..." sh -c "printf '%s' '$_lo' | grep -q '\.\.\. - 45%'"
+  check "screen_line: o fim (progresso e dica) nunca e cortado" sh -c "printf '%s' '$_lo' | grep -q '45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar\$'"
+  eq "screen_line: uma linha so" "$(printf '%s' "$_lo" | wc -l | tr -d ' ')" "0"
   # largura real na fonte do tema (so com Pillow)
   if python3 -c 'import PIL' 2>/dev/null; then
-    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "O servidor não tem plataformas com jogos (ou seu usuário não pode vê-las). Confira o login." "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do screen_text "$t" 30; printf "\036"; done')
+    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "Zelda" "$1" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW" "Pokémon: Edição Ç ã õ ü"; do screen_line "$t" 26 "100%   123.4 MB / 999.9 MB  -  12.3 MB/s  -  B: parar"; printf "\036"; done' sh "$_lt")
     _mx=$(printf '%s' "$_ww" | python3 -I -c '
 import sys
 from PIL import ImageFont
-f = ImageFont.truetype(sys.argv[1], 30)
+f = ImageFont.truetype(sys.argv[1], 26)
+raw = sys.stdin.buffer.read().decode("latin-1")
+print(int(max(f.getlength(l) for l in raw.split("\x1e") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
+    [ "$_mx" -le 1280 ] && ok "screen_line: maior linha mede $_mx px na fonte do tema (tela do TSP: 1280)" || bad "screen_line: linha de $_mx px passa da tela"
+    _mb=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; SCREEN_PX=900; screen_line "$1" 26 "100%   123.4 MB / 999.9 MB  -  12.3 MB/s  -  B: parar"' sh "$_lt" | python3 -I -c '
+import sys
+from PIL import ImageFont
+f = ImageFont.truetype(sys.argv[1], 26)
+print(int(f.getlength(sys.stdin.buffer.read().decode("latin-1"))))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
+    [ "$_mb" -le 1024 ] && ok "screen_line: com SCREEN_PX=900 (Brick) mede $_mb px (tela: 1024)" || bad "screen_line: no Brick mede $_mb px"
+  fi
+
+  eq "screen_wrap: texto curto fica como esta (UTF-8)" "$(SH 'screen_wrap "Não é possível"' | hex_of)" "$(printf 'Não é possível' | hex_of)"
+  eq "screen_wrap: linha em branco preservada" "$(SH 'screen_wrap "Um
+
+Dois"')" "$(printf 'Um\n\nDois')"
+  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
+  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_wrap "$1"' sh "$_long")
+  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_wrap: linha longa e quebrada em varias" || bad "screen_wrap: linha longa nao quebrou"
+  eq "screen_wrap: quebrar nao perde nem troca palavras (UTF-8 intacto)" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | hex_of)"
+  _lw=$(printf '%s\n' "$_wr" | python3 -I -c 'import sys; print(max(len(l.rstrip("\n")) for l in sys.stdin.buffer.read().decode("utf-8").splitlines()))')
+  [ "$_lw" -le 62 ] && ok "screen_wrap: nenhuma linha passa de 62 caracteres ($_lw)" || bad "screen_wrap: linha com $_lw caracteres"
+  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_wrap "$1"' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
+  eq "screen_wrap: palavra gigante nao e partida (so passa da margem)" "$_wr2" "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  if python3 -c 'import PIL' 2>/dev/null; then
+    _wm=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "$1" "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do to_latin1 "$(screen_wrap "$t")"; printf "\036"; done' sh "$_long" | python3 -I -c '
+import sys
+from PIL import ImageFont
+f = ImageFont.truetype(sys.argv[1], 24)
 raw = sys.stdin.buffer.read().decode("latin-1")
 print(int(max(f.getlength(l) for blk in raw.split("\x1e") for l in blk.split("\n") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
-    [ "$_mx" -le 1000 ] && ok "screen_text: maior linha mede $_mx px na fonte do tema (tela do Brick: 1024)" || bad "screen_text: linha de $_mx px passa da tela"
+    [ "$_wm" -le 1100 ] && ok "screen_wrap: maior linha mede $_wm px a 24 pt (cabe na tela do TSP, 1280)" || bad "screen_wrap: linha de $_wm px"
   fi
 
   eq "urlenc UTF-8 + simbolos" "$(SH 'urlenc "Pokémon: Emerald & Co. (USA).gba"')" "Pok%C3%A9mon%3A%20Emerald%20%26%20Co.%20%28USA%29.gba"
@@ -245,7 +279,7 @@ fi
 
 if scenario "e2e-server-down"; then
   start_server; new_sd
-  write_cfg '{"base_url":"http://127.0.0.1:9","token":"x"}'
+  write_cfg '{"ui_encoding":"latin1","base_url":"http://127.0.0.1:9","token":"x"}'
   q sel "contains:Sair"
   run_app
   eq "app terminou sem erro" "$RC" "0"
@@ -257,7 +291,7 @@ fi
 if scenario "e2e-tailscale-hint"; then
   start_server; new_sd
   printf '#!/bin/sh\n[ "$1" = status ] && { echo "{\\"BackendState\\":\\"Stopped\\"}"; exit 0; }\nexit 1\n' >"$SD/System/bin/tailscale"; chmod +x "$SD/System/bin/tailscale"
-  write_cfg '{"base_url":"http://100.101.2.3:9","token":"x"}'
+  write_cfg '{"ui_encoding":"latin1","base_url":"http://100.101.2.3:9","token":"x"}'
   q sel "contains:Sair"
   run_app
   check "dica do Tailscale parado aparece" grep -q "Tailscale não está conectado" "$M/sel.log"
@@ -274,7 +308,7 @@ ip) echo 127.0.0.1 ;;
 esac
 EOF
   chmod +x "$SD/System/bin/tailscale"
-  write_cfg "{\"base_url\":\"http://nas-teste.ts.net:$PORT\",\"token\":\"$TOKEN\"}"
+  write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://nas-teste.ts.net:$PORT\",\"token\":\"$TOKEN\"}"
   q sel "contains:Explorar"
   run_app
   check "nome MagicDNS resolvido pelo Tailscale e platformas carregadas" grep -q "Game Boy Advance" "$M/sel.log"
@@ -360,14 +394,15 @@ if scenario "e2e-delete-single"; then
   start_server; new_sd; cfg_token
   mkdir -p "$SD/Saves/GBA"; printf s >"$SD/Saves/GBA/keep.sav"
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
-    "contains:Advançe" "contains:Excluir"
+    "contains:Advançe" "contains:Excluir" "contains:Sim, excluir"
   run_app
   f="$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
   check "jogo foi baixado e excluido" test ! -e "$f"
   check "lista de arquivos foi removida" sh -c "! ls '$SD/Data/romm/dl' 2>/dev/null | grep -q lst"
   check "saves intactos" test -f "$SD/Saves/GBA/keep.sav"
   eq "Excluir so aparece com o jogo no cartao (1 menu de 3)" "$(grep -c '^  | .*Excluir do cartão SD' "$M/sel.log")" "1"
-  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/info.log"
+  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/sel.log"
+  check "confirmacao tem 'Não' (item inicial) e 'Sim, excluir'" grep -Eq '^  \| 2\. Sim, excluir' "$M/sel.log"
   check "mostrou o resultado" grep -q "Excluído do cartão SD" "$M/info.log"
   check "log registra o que apagou" grep -q "excluir id=.*apagado Roms/GBA/Adv" "$APPLOG"
   end_scenario
@@ -376,8 +411,7 @@ fi
 if scenario "e2e-delete-cancel"; then
   start_server; new_sd; cfg_token
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
-    "contains:Advançe" "contains:Excluir"
-  q info "key:A" "key:B"      # 1o: aviso do fim do download; 2o: confirmacao -> B (nao)
+    "contains:Advançe" "contains:Excluir" "contains:Não"
   run_app
   check "B na confirmacao nao apaga nada" test -f "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
   check "lista de arquivos continua" test -f "$SD/Data/romm/dl/1.lst"
@@ -388,7 +422,7 @@ if scenario "e2e-delete-multifile"; then
   start_server; new_sd; cfg_token
   printf x >"$SD/Roms/PS/Outro Jogo.cue"
   q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para" \
-    "contains:Crash" "contains:Excluir"
+    "contains:Crash" "contains:Excluir" "contains:Sim, excluir"
   run_app
   check "arquivos do jogo multi-arquivo apagados" sh -c "[ ! -e '$SD/Roms/PS/Crash Test (PS1).cue' ] && [ ! -e '$SD/Roms/PS/Crash Test (PS1).bin' ]"
   check "outro jogo na mesma pasta intacto" test -f "$SD/Roms/PS/Outro Jogo.cue"
@@ -409,7 +443,7 @@ fi
 if scenario "e2e-delete-legacy"; then
   start_server; new_sd; cfg_token
   printf x >"$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"   # baixado por uma versao sem lista
-  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir"
+  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir" "contains:Sim, excluir"
   run_app
   check "arquivo unico antigo excluido pelo menu" test ! -e "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
   end_scenario
@@ -443,7 +477,8 @@ if scenario "e2e-cancel-and-resume"; then
   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"
   run_app
   check "parada pelo B explicada" grep -q "Download parado" "$M/info.log"
-  check "progresso foi exibido" grep -Eq "Baixando" "$M/info.log"
+  check "progresso foi exibido em UMA linha (porcentagem + dica)" grep -Eq "^.*[0-9]+% .*B: parar$" "$M/info.log"
+  check "nenhuma tela do infoscreen tem varias linhas" bash -c "! grep -B1 '^----\$' '$M/info.log' | grep -q '^\$'"
   check "retomou depois (Range)" grep -Eq "range-from=[1-9][0-9]*" "$REQLOG"
   eq "arquivo final identico" "$(sha_file "$SD/Roms/GBA/Big Flaky Adventure.gba" 2>/dev/null)" "$(sha_of 3)"
   end_scenario
@@ -451,7 +486,7 @@ fi
 
 if scenario "e2e-unmapped-asks-and-remembers"; then
   start_server; new_sd; cfg_token
-  q sel "contains:Explorar" "contains:Arcade" "contains:Metal" "contains:Baixar para" "exact:FBNEO" "contains:Zed" "contains:Baixar para"
+  q sel "contains:Explorar" "contains:Arcade" "contains:Metal" "contains:Baixar para" "contains:FBNEO" "contains:Zed" "contains:Baixar para"
   run_app
   eq "ZIP de arcade fica intacto (nao e' extraido)" "$(sha_file "$SD/Roms/FBNEO/mslug.zip" 2>/dev/null)" "$(sha_of 80)"
   check "segundo jogo foi para a pasta lembrada" test -f "$SD/Roms/FBNEO/zedfight.zip"
@@ -472,7 +507,7 @@ fi
 
 if scenario "e2e-search-global"; then
   start_server; new_sd
-  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\",\"platform_map\":{\"arcade\":\"FBNEO\"}}"
+  write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\",\"platform_map\":{\"arcade\":\"FBNEO\"}}"
   q vk "text:metal"
   q sel "contains:Buscar jogo" "contains:Metal"
   run_app
@@ -510,13 +545,53 @@ if scenario "e2e-settings"; then
   end_scenario
 fi
 
+if scenario "e2e-encoding-calibration"; then
+  # escolher a linha UTF-8: o app passa a mandar UTF-8 ao selector
+  start_server; new_sd
+  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
+  q sel "contains:2. a" "contains:Explorar" "contains:Game Boy Advance" "cancel" "cancel" "cancel"
+  run_app
+  eq "escolheu a linha UTF-8 -> salvo utf8" "$(jq -r .ui_encoding "$CFGF")" "utf8"
+  check "calibracao mostrou as duas linhas (Latin-1 e UTF-8)" sh -c "LC_ALL=C grep -q 'a$(printf '\347\343')o cora' '$M/sel.raw' && LC_ALL=C grep -q 'a$(printf '\303\247\303\243')o cora' '$M/sel.raw'"
+  check "depois o titulo dos menus chegou em UTF-8" sh -c "LC_ALL=C grep -q 'Configura$(printf '\303\247\303\265')es' '$M/sel.raw'"
+  check "e nenhum byte Latin-1 de 'Configurações' chegou" sh -c "! LC_ALL=C grep -q 'Configura$(printf '\347\365')es' '$M/sel.raw'"
+  end_scenario
+
+  # escolher a linha Latin-1: menus seguem em Latin-1 (1 byte por acento)
+  start_server; new_sd
+  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
+  q sel "contains:1. a" "cancel"
+  run_app
+  eq "escolheu a linha Latin-1 -> salvo latin1" "$(jq -r .ui_encoding "$CFGF")" "latin1"
+  check "menu principal em Latin-1" sh -c "LC_ALL=C grep -q 'Configura$(printf '\347\365')es' '$M/sel.raw'"
+  end_scenario
+
+  # B na calibracao: nada e' salvo (pergunta de novo na proxima) e o app segue em Latin-1
+  start_server; new_sd
+  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
+  q sel "cancel" "cancel"
+  run_app
+  eq "B na calibracao nao salva nada" "$(jq -r '.ui_encoding // "nada"' "$CFGF")" "nada"
+  check "o app seguiu para o menu principal" grep -q "Explorar plataformas" "$M/sel.log"
+  end_scenario
+
+  # refazer pelas Configuracoes
+  start_server; new_sd; cfg_token
+  q sel "contains:Configurações" "contains:Acentos na tela" "contains:2. a" "cancel" "cancel"
+  run_app
+  eq "Configuracoes > Acentos na tela: virou utf8" "$(jq -r .ui_encoding "$CFGF")" "utf8"
+  check "item de Configuracoes mostra o valor atual (Latin-1)" grep -q "Acentos na tela: Latin-1" "$M/sel.log"
+  end_scenario
+fi
+
 if scenario "e2e-bad-config-recovers"; then
   start_server; new_sd
   mkdir -p "$SD/Data/romm"; printf '{quebrado' >"$CFGF"
   q vk "text:127.0.0.1:$PORT" "text:$TOKEN"
-  q sel "contains:Token"
+  q sel "contains:1. a" "contains:Token"   # 1a pergunta: calibracao dos acentos (config nova, sem ui_encoding)
   run_app
   check "config quebrada foi guardada como .bad" test -f "$CFGF.bad"
+  eq "calibracao salva ui_encoding" "$(jq -r .ui_encoding "$CFGF")" "latin1"
   check "assistente rodou e conectou" grep -q "Conectado!" "$M/info.log"
   end_scenario
 fi

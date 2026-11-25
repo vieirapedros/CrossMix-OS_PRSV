@@ -40,7 +40,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra�
 | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
 | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
 
-Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se algum acento ainda sair errado nas telas de aviso), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
+Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`), `ui_encoding` (`latin1`/`utf8`: como o `selector` desenha acentos; o app pergunta na primeira abertura e *Configurações → Acentos na tela* refaz), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
 
 ## Se algo der errado
 
@@ -53,7 +53,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
 | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
 | Jogo baixado não aparece com "Excluir" | O app só sabe excluir o que baixou: cada download grava a lista de arquivos em `Data/romm/dl/<id>.lst`. Jogos de **arquivo único** baixados antes dessa lista existir são reconhecidos pelo nome; jogos de **vários arquivos** (ZIP) baixados antes dela não: baixe-o de novo uma vez (sobrescreve) e a opção passa a aparecer. |
 | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
-| Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
+| Acento errado ou quadradinhos no texto | O progresso do download usa o `infoscreen` do sistema, que só desenha **uma linha** em Latin-1: o app mostra `título... - 45% ... - B: parar`, cortando o título com `...`. Avisos e confirmações usam o `selector` (vários parágrafos). Se os acentos saírem tortos, vá em *Configurações → Acentos na tela* e escolha a linha que aparece certa (grava `ui_encoding`). Caracteres que a fonte não tem viram ASCII ou `?` (`lib/screentext.awk`, `data/latin1.tsv`). Se ainda aparecer algo estranho, tire uma foto da tela. |
 
 ## Limitações
 
