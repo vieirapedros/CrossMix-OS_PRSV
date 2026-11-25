@@ -66,7 +66,7 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 | `romm-library-ui.patch` | Patch git do commit da seção 12 (avisos e confirmações pelo `selector`, progresso em uma linha, calibração dos acentos), `git am` depois do anterior. |
 | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
 | `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
-| `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até a correção do RetroArch (`1741df2e`, ref `HEAD`; requer `d5102fab`). Não contém o commit que adiciona os arquivos de `releases/`. |
+| `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até o `83fcda45` (ref `HEAD`; requer `d5102fab`). **Regerado em 2026-11-25** (antes parava em `1741df2e`, sem os commits da RomM Library). Não contém o commit que adiciona esta versão do bundle. |
 | `SHA256SUMS.txt` | Hashes para conferir a integridade (`sha256sum -c SHA256SUMS.txt`). |
 
 `RomMLibrary-sdcard.zip` e `JukaMix-fixes-sdcard.zip` são independentes entre si; `RetroArch-fix-sdcard.zip` substitui o `RetroArch-probe-sdcard.zip`. Patches e bundle servem só para o git; não vão ao cartão.
