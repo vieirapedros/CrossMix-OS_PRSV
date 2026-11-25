@@ -1,0 +1,956 @@
+From 4894a4c202b252518f9308097525b8312656f2d8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 24 Nov 2026 23:56:54 -0300
+Subject: [PATCH] RomM Library: fix unreadable download and notice screens on
+ the device
+
+The infoscreen draws a single line (one TTF_RenderText_Solid call), so every
+newline showed as a box and long text ran off the screen.
+
+- Download progress: one line (title cut with "...", progress and hint kept).
+- Notices and confirmations: selector menus with the text in the title,
+  word-wrapped; confirm is a "No" / "Yes, delete" menu.
+- Folder picker returns the folder by item number.
+- ui_encoding (latin1|utf8): asked once on first start by showing both
+  encodings; redo in Settings > Accents on screen.
+- Tests: 159 -> 182 checks (screen_line/screen_wrap widths measured with the
+  theme font, calibration, bytes received by the selector).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RhMAqBm84PVkwcVFZvG6f2
+---
+ Apps/RomMLibrary/README.md          |   4 +-
+ Apps/RomMLibrary/lib/common.sh      | 104 ++++++++++++++++----
+ Apps/RomMLibrary/lib/download.sh    |   3 +-
+ Apps/RomMLibrary/lib/i18n.sh        |  10 +-
+ Apps/RomMLibrary/lib/platforms.sh   |  10 +-
+ Apps/RomMLibrary/lib/screens.sh     |  10 +-
+ Apps/RomMLibrary/lib/screentext.awk | 138 +++++++++++++++++++--------
+ README.md                           |   2 +-
+ docs/HISTORICO-2026-11-22.md        |  49 +++++++++-
+ tests/romm_library/mocks/selector   |  39 ++++++--
+ tests/romm_library/run.sh           | 143 +++++++++++++++++++++-------
+ 11 files changed, 401 insertions(+), 111 deletions(-)
+
+diff --git a/Apps/RomMLibrary/README.md b/Apps/RomMLibrary/README.md
+index 25a2607d..87521650 100644
+--- a/Apps/RomMLibrary/README.md
++++ b/Apps/RomMLibrary/README.md
+@@ -40,7 +40,7 @@ Jogos de vários arquivos (ex.: PS1 `.cue` + `.bin`) chegam em ZIP e são extra
+ | Log | `System/logs/romm_library.log` (nunca contém senha/token) |
+ | Exemplo de config | `Apps/RomMLibrary/config.example.json` |
+ 
+-Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`; use `en` se algum acento ainda sair errado nas telas de aviso), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
++Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `password`, `page_size` (5–100), `lang` (`pt`/`en`), `ui_encoding` (`latin1`/`utf8`: como o `selector` desenha acentos; o app pergunta na primeira abertura e *Configurações → Acentos na tela* refaz), `insecure` (`1` aceita certificado inválido), `font_size` (opcional, tamanho de fonte das listas).
+ 
+ ## Se algo der errado
+ 
+@@ -53,7 +53,7 @@ Chaves do `config.json` (todas texto): `base_url`, `token`, `username`, `passwor
+ | Download parou / caiu | Baixe o mesmo jogo de novo: continua de onde parou. *Configurações → Apagar downloads incompletos* limpa restos. |
+ | Jogo baixado não aparece com "Excluir" | O app só sabe excluir o que baixou: cada download grava a lista de arquivos em `Data/romm/dl/<id>.lst`. Jogos de **arquivo único** baixados antes dessa lista existir são reconhecidos pelo nome; jogos de **vários arquivos** (ZIP) baixados antes dela não: baixe-o de novo uma vez (sobrescreve) e a opção passa a aparecer. |
+ | "Sem espaço livre" | O app confere o espaço antes (e dobra a conta para jogos extraídos de ZIP). |
+-| Texto embaralhado ou cortado nas telas de download e de aviso | Essas telas usam o `infoscreen` do sistema, que desenha o texto como Latin-1 e não quebra linhas. O app converte os acentos, troca o que a fonte não tem por ASCII (aspas curvas, `…`, `–`) ou por `?` (japonês, chinês) e quebra as linhas (`lib/screentext.awk`, `data/latin1.tsv`). Os menus usam o `selector`, que lê UTF-8. Se ainda aparecer algo estranho, tire uma foto da tela e abra um issue. |
++| Acento errado ou quadradinhos no texto | O progresso do download usa o `infoscreen` do sistema, que só desenha **uma linha** em Latin-1: o app mostra `título... - 45% ... - B: parar`, cortando o título com `...`. Avisos e confirmações usam o `selector` (vários parágrafos). Se os acentos saírem tortos, vá em *Configurações → Acentos na tela* e escolha a linha que aparece certa (grava `ui_encoding`). Caracteres que a fonte não tem viram ASCII ou `?` (`lib/screentext.awk`, `data/latin1.tsv`). Se ainda aparecer algo estranho, tire uma foto da tela. |
+ 
+ ## Limitações
+ 
+diff --git a/Apps/RomMLibrary/lib/common.sh b/Apps/RomMLibrary/lib/common.sh
+index 7f5158df..53a2293c 100755
+--- a/Apps/RomMLibrary/lib/common.sh
++++ b/Apps/RomMLibrary/lib/common.sh
+@@ -118,6 +118,8 @@ load_settings() {
+   LANG_UI=$(cfg_get lang)
+   [ "$LANG_UI" = en ] || LANG_UI=pt
+   lang_load "$LANG_UI"
++  UI_ENC=$(cfg_get ui_encoding)   # latin1 | utf8 (como o selector desenha os acentos); vazio = ainda nao calibrado
++  case "$UI_ENC" in latin1 | utf8) ;; *) UI_ENC="" ;; esac
+   FONT_SIZE=$(cfg_get font_size)
+   case "$FONT_SIZE" in *[!0-9]*) FONT_SIZE="" ;; esac
+   INSECURE=$(cfg_get insecure)
+@@ -128,33 +130,74 @@ load_settings() {
+ to_real_nl() { printf '%s' "$1" | awk '{ gsub(/\\n/, "\n"); print }'; }
+ to_lit_nl() { printf '%s' "$1" | awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }'; }
+ 
+-# O infoscreen (sdl2imgshow) le o texto como Latin-1 e nao quebra linhas; o selector e o teclado leem UTF-8.
+-# screen_text converte (acentos viram 1 byte Latin-1, aspas curvas etc. viram ASCII, o resto vira "?")
+-# e quebra as linhas longas na largura da tela.  Ver lib/screentext.awk.
+-screen_text() { # texto [corpo-da-fonte] -> texto pronto para "infoscreen -m"
+-  _st=$(printf '%s\n' "$1" | LC_ALL=C awk -v fs="${2:-30}" -v px=880 -v tbl="$APP_DIR/data/latin1.tsv" \
+-    -f "$APP_DIR/lib/screentext.awk" 2>/dev/null | LC_ALL=C tr -c '\11\12\40-\176' '?' | LC_ALL=C tr -s '?')
+-  if [ -n "$_st" ]; then printf '%b' "$_st"; else printf '%s' "$1"; fi
++# ---- texto para os programas de tela do sistema ------------------------------------------------------
++# infoscreen (sdl2imgshow) e selector desenham com TTF_RenderText_*, que leem o texto como Latin-1, nao UTF-8.
++# O infoscreen so desenha UMA linha (quebra de linha vira quadradinho, o que passa da largura sai da tela);
++# o selector aceita varias linhas no titulo.  Por isso: infoscreen so para frases curtas e para o progresso do
++# download (screen_line); avisos e confirmacoes usam o selector (ui_notice/ui_confirm).  Ver lib/screentext.awk.
++SCREEN_PX=1150 # largura util (px) de uma linha do infoscreen; o Brick tem tela menor
++case "$(head -n 1 /etc/trimui_device.txt 2>/dev/null)" in brick) SCREEN_PX=900 ;; esac
++
++screen_awk() { # modo corpo-da-fonte largura-px [fim]: o texto vem no stdin
++  LC_ALL=C awk -v mode="$1" -v fs="$2" -v px="$3" -v tail="$4" -v tbl="$APP_DIR/data/latin1.tsv" \
++    -f "$APP_DIR/lib/screentext.awk" 2>/dev/null
++}
++
++latin1_out() { LC_ALL=C tr -c '\11\12\40-\176' '?' | LC_ALL=C tr -s '?'; } # sobras nao Latin-1 viram "?"
++
++to_latin1() { # texto (varias linhas ok) -> o mesmo texto em Latin-1 (acentos 1 byte; o resto vira ASCII ou "?")
++  _l1=$(printf '%s\n' "$1" | screen_awk conv 30 880 | latin1_out)
++  if [ -n "$_l1" ]; then printf '%b' "$_l1"; else printf '%s' "$1"; fi
++}
++
++screen_line() { # texto [corpo-da-fonte] [fim] -> UMA linha em Latin-1 que cabe na tela (corta o texto, nunca o fim)
++  _sl=$(printf '%s\n' "$1" | screen_awk line "${2:-30}" "$SCREEN_PX" "$3" | latin1_out)
++  if [ -n "$_sl" ]; then printf '%b' "$_sl"; else printf '%s' "$1" | tr '\n' ' '; fi
++}
++
++screen_wrap() { # texto -> o mesmo texto (UTF-8) com as linhas longas quebradas por palavra (titulos do selector)
++  _sw=$(printf '%s\n' "$1" | screen_awk wrap 24 720)
++  if [ -n "$_sw" ]; then printf '%s' "$_sw"; else printf '%s' "$1"; fi
++}
++
++ui_text() { # texto -> no encoding que o selector desenha (Latin-1, ou UTF-8 se ui_encoding = utf8)
++  if [ "$UI_ENC" = utf8 ]; then printf '%s' "$1"; else to_latin1 "$1"; fi
+ }
+ 
+-ui_info() { # mostra o texto e segue (a imagem fica na tela)
+-  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" "${2:-32}")" -fs "${2:-32}" >/dev/null 2>&1
++ui_info() { # frase curta no infoscreen e segue (a imagem fica na tela); varias linhas viram uma
++  "$INFOSCREEN" -m "$(screen_line "$(to_real_nl "$1")" "${2:-32}")" -fs "${2:-32}" >/dev/null 2>&1
+ }
+ 
+-ui_wait() { # texto [teclas] -> imprime a tecla pressionada
+-  "$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")" 30)" -fs 30 -k "${2:-A B}" 2>/dev/null
++ui_wait() { # texto [teclas] -> imprime A (OK) ou B (voltou/cancelou)
++  _uw=$(ui_choose "$(screen_wrap "$(to_real_nl "$1")")" "$L_OK")
++  if [ -n "$_uw" ]; then printf 'A'; else printf 'B'; fi
+ }
+ 
+-ui_notice() { ui_wait "$1${NL}${NL}A: $L_OK" "A B" >/dev/null; }
++ui_notice() { # aviso: menu de um item so (A: OK; B tambem fecha)
++  ui_choose "$(screen_wrap "$(to_real_nl "$1")")" "$L_OK" >/dev/null
++}
+ 
+-ui_confirm() { # texto -> 0 se A (sim)
+-  _uk=$("$INFOSCREEN" -m "$(screen_text "$(to_real_nl "$1")${NL}${NL}A: $L_YES      B: $L_NO" 30)" -fs 30 -k "A B" 2>/dev/null)
+-  [ "$_uk" = A ]
++ui_confirm() { # texto [rotulo-do-sim] -> 0 so se escolher "sim"; B ou "nao" = 1.  "Nao" vem primeiro (item inicial)
++  _uk=$(ui_choose "$(screen_wrap "$(to_real_nl "$1")")" "1. $L_NO" "2. ${2:-$L_YES}")
++  [ "$(choice_num "$_uk")" = 2 ]
+ }
+ 
+-ui_choose() { # titulo item... -> imprime o item escolhido (vazio = cancelou)
+-  _ct=$(to_lit_nl "$1")
++ui_choose() { # titulo item... -> imprime o item escolhido, no texto ORIGINAL (UTF-8); vazio = cancelou
++  _ct=$(to_lit_nl "$(ui_text "$1")")
+   shift
++  _cconv=0
++  if [ "$UI_ENC" != utf8 ] && [ "$#" -gt 0 ]; then
++    # converte todos os itens de uma vez (um processo, nao um por item) e remonta os argumentos;
++    # os originais ficam num arquivo para devolver o item escolhido no texto original (as telas comparam com ele)
++    printf '%s\n' "$@" >"$TMPD/ui_orig"
++    _ci=$(ui_text "$(cat "$TMPD/ui_orig")")
++    if [ -n "$_ci" ]; then
++      printf '%s\n' "$_ci" >"$TMPD/ui_conv"
++      set --
++      while IFS= read -r _cl; do set -- "$@" "$_cl"; done <"$TMPD/ui_conv"
++      _cconv=1
++    fi
++  fi
+   if [ -n "$FONT_SIZE" ]; then
+     _co=$("$SELECTOR" -fs "$FONT_SIZE" -t "$_ct" -c "$@" 2>/dev/null | grep 'You selected')
+   else
+@@ -162,9 +205,36 @@ ui_choose() { # titulo item... -> imprime o item escolhido (vazio = cancelou)
+   fi
+   _co=${_co#*You selected: }
+   [ "$_co" = "You selected:" ] && _co=""
++  if [ "$_cconv" = 1 ] && [ -n "$_co" ]; then
++    while IFS= read -r _cv <&3 && IFS= read -r _cg <&4; do
++      if [ "$_cv" = "$_co" ]; then
++        _co=$_cg
++        break
++      fi
++    done 3<"$TMPD/ui_conv" 4<"$TMPD/ui_orig"
++  fi
+   printf '%s' "$_co"
+ }
+ 
++calibrate_encoding() { # mostra uma linha em cada codificacao; quem escolher a que aparece certa define ui_encoding
++  # (so ASCII no titulo: ele precisa ser legivel nas duas). B pula e deixa como esta (latin1 nesta sessao).
++  _ea=$(to_latin1 "1. ação coração você é ü")
++  _eb="2. ação coração você é ü"
++  if [ -n "$FONT_SIZE" ]; then
++    _ec=$("$SELECTOR" -fs "$FONT_SIZE" -t "$L_ENC_TITLE" -c "$_ea" "$_eb" 2>/dev/null | grep 'You selected')
++  else
++    _ec=$("$SELECTOR" -t "$L_ENC_TITLE" -c "$_ea" "$_eb" 2>/dev/null | grep 'You selected')
++  fi
++  _ec=${_ec#*You selected: }
++  case "$(choice_num "$_ec")" in
++  1) UI_ENC=latin1 ;;
++  2) UI_ENC=utf8 ;;
++  *) return 1 ;;
++  esac
++  cfg_set ui_encoding "$UI_ENC"
++  log "ui_encoding=$UI_ENC"
++}
++
+ ui_input() { # nome-do-fundo texto-inicial [pw] -> imprime o texto digitado (vazio = cancelou)
+   _ib="$APP_DIR/res/kb_$1_$LANG_UI.png"
+   [ -f "$_ib" ] || _ib="$SDCARD/trimui/res/crossmix-os/bg-plain.png"
+diff --git a/Apps/RomMLibrary/lib/download.sh b/Apps/RomMLibrary/lib/download.sh
+index fed17e93..32566bec 100755
+--- a/Apps/RomMLibrary/lib/download.sh
++++ b/Apps/RomMLibrary/lib/download.sh
+@@ -47,7 +47,8 @@ dl_run() { # url parcial retomar(0|1) total titulo
+     else
+       _dr_line="$(fmt_size "$_dr_cur")$_dr_speed"
+     fi
+-    _dr_k=$("$INFOSCREEN" -m "$(screen_text "$L_DL_PROGRESS${NL}${NL}$_dr_title${NL}${NL}$_dr_line${NL}${NL}$L_DL_CANCEL_HINT" 28)" -fs 28 -k B -t 1 2>/dev/null)
++    # o infoscreen desenha UMA linha so: titulo (cortado com "...") + progresso + dica; o fim nunca e cortado
++    _dr_k=$("$INFOSCREEN" -m "$(screen_line "$_dr_title" 26 "$_dr_line  -  $L_DL_STOP")" -fs 26 -k B -t 1 2>/dev/null)
+     if [ "$_dr_k" = B ]; then
+       DL_CANCELLED=1
+       kill "$DL_PID" 2>/dev/null
+diff --git a/Apps/RomMLibrary/lib/i18n.sh b/Apps/RomMLibrary/lib/i18n.sh
+index e84cd6f5..a7e3e7b0 100755
+--- a/Apps/RomMLibrary/lib/i18n.sh
++++ b/Apps/RomMLibrary/lib/i18n.sh
+@@ -42,7 +42,8 @@ lang_load() {
+     L_NO_FOLDER="No destination folder chosen. Nothing was downloaded."
+     L_DL_STARTING="Starting download..."
+     L_DL_PROGRESS="Downloading"
+-    L_DL_CANCEL_HINT="B: stop (you can resume later)"
++    L_DL_STOP="B: stop"
++    L_DEL_YES="Yes, delete"
+     L_DL_OK="Done! Saved to"
+     L_DL_OK2="Refresh the game list (or restart MainUI) to see it."
+     L_DL_CANCELLED="Download stopped. Download again to resume."
+@@ -71,6 +72,8 @@ lang_load() {
+     L_S_INSECURE="Accept invalid HTTPS certificate"
+     L_S_FOLDERS="Forget remembered destination folders"
+     L_S_PARTS="Delete incomplete downloads"
++    L_S_ENC="Accents on screen"
++    L_ENC_TITLE="Which line shows the accents correctly?\n(A: choose, B: skip)"
+     L_S_ABOUT="About / diagnostics"
+     L_ON="yes"; L_OFF="no"
+     L_FOLDERS_CLEARED="Remembered folders cleared."
+@@ -132,7 +135,8 @@ lang_load() {
+     L_NO_FOLDER="Nenhuma pasta escolhida. Nada foi baixado."
+     L_DL_STARTING="Iniciando o download..."
+     L_DL_PROGRESS="Baixando"
+-    L_DL_CANCEL_HINT="B: parar (dá para retomar depois)"
++    L_DL_STOP="B: parar"
++    L_DEL_YES="Sim, excluir"
+     L_DL_OK="Pronto! Salvo em"
+     L_DL_OK2="Atualize a lista do emulador (ou reinicie o MainUI) para ver o jogo."
+     L_DL_CANCELLED="Download parado. Baixe de novo para retomar de onde parou."
+@@ -161,6 +165,8 @@ lang_load() {
+     L_S_INSECURE="Aceitar certificado HTTPS inválido"
+     L_S_FOLDERS="Esquecer pastas de destino lembradas"
+     L_S_PARTS="Apagar downloads incompletos"
++    L_S_ENC="Acentos na tela"
++    L_ENC_TITLE="Qual linha mostra os acentos certos?\n(A: escolher, B: pular)"
+     L_S_ABOUT="Sobre / diagnóstico"
+     L_ON="sim"; L_OFF="não"
+     L_FOLDERS_CLEARED="Pastas lembradas apagadas."
+diff --git a/Apps/RomMLibrary/lib/platforms.sh b/Apps/RomMLibrary/lib/platforms.sh
+index 8df61ae6..a2ab1850 100755
+--- a/Apps/RomMLibrary/lib/platforms.sh
++++ b/Apps/RomMLibrary/lib/platforms.sh
+@@ -32,13 +32,21 @@ plat_ask_folder() { # pid slug fs_slug -> pasta escolhida (lembrada) ou vazio
+     [ -d "$_pd" ] || continue
+     basename "$_pd" >>"$_pa"
+   done
++  # itens numerados ("3. GBA"): o texto do menu passa por conversao de encoding, entao a pasta vem pelo numero
++  _pn=0
+   set --
+   while IFS= read -r _pl; do
+-    [ -n "$_pl" ] && set -- "$@" "$_pl"
++    [ -n "$_pl" ] || continue
++    _pn=$((_pn + 1))
++    set -- "$@" "$_pn. $_pl"
+   done <"$_pa"
+   [ "$#" -gt 0 ] || return 1
+   _pc=$(ui_choose "$L_ASK_FOLDER" "$@")
+   [ -n "$_pc" ] || return 1
++  _pn=$(choice_num "$_pc")
++  case "$_pn" in '' | *[!0-9]*) return 1 ;; esac
++  _pc=$(sed -n "${_pn}p" "$_pa")
++  [ -n "$_pc" ] || return 1
+   [ -d "$ROMS_DIR/$_pc" ] || return 1
+   map_set "$_pak" "$_pc"
+   log "mapeamento: $_pak -> $_pc"
+diff --git a/Apps/RomMLibrary/lib/screens.sh b/Apps/RomMLibrary/lib/screens.sh
+index c2e4611c..2d57b6fe 100755
+--- a/Apps/RomMLibrary/lib/screens.sh
++++ b/Apps/RomMLibrary/lib/screens.sh
+@@ -61,7 +61,7 @@ screen_game() { # usa R_*
+       [ "$_sg_rc" = 0 ] && return 0
+     elif [ "$_sg_ndel" != 0 ] && [ "$_sg_k" = "$_sg_ndel" ]; then
+       _sg_sum=$(rom_del_summary "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI")
+-      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES"; then
++      if ui_confirm "$L_DEL_ASK${NL}${NL}$R_NAME${NL}$_sg_sum${NL}${NL}$L_DEL_SAVES" "$L_DEL_YES"; then
+         rom_delete_do "$R_ID" "$_sg_folder" "$R_FS" "$R_MULTI"
+         ui_notice "$DEL_MSG${NL}$R_NAME"
+       fi
+@@ -304,10 +304,11 @@ screen_settings() {
+     _ss_srv=$(cfg_get base_url)
+     if [ -n "$(cfg_get token)" ]; then _ss_login="$L_S_LOGIN_TOKEN"; else _ss_login=$(cfg_get username); fi
+     if [ "$(cfg_get insecure)" = 1 ]; then _ss_ins="$L_ON"; else _ss_ins="$L_OFF"; fi
++    case "$UI_ENC" in utf8) _ss_enc="UTF-8" ;; latin1) _ss_enc="Latin-1" ;; *) _ss_enc="?" ;; esac
+     _ss_c=$(ui_choose "$L_SETTINGS  ($L_BACK_HINT)" \
+       "1. $L_S_SERVER: $_ss_srv" "2. $L_S_LOGIN: $_ss_login" "3. $L_S_TEST" \
+       "4. $L_S_PAGE: $PAGE_SIZE" "5. $L_S_LANG: $LANG_UI" "6. $L_S_INSECURE: $_ss_ins" \
+-      "7. $L_S_FOLDERS" "8. $L_S_PARTS" "9. $L_S_ABOUT")
++      "7. $L_S_FOLDERS" "8. $L_S_PARTS" "9. $L_S_ENC: $_ss_enc" "10. $L_S_ABOUT")
+     case "$(choice_num "$_ss_c")" in
+     1) ask_server && settings_test ;;
+     2) ask_auth && settings_test ;;
+@@ -338,7 +339,8 @@ screen_settings() {
+       _ss_k=$(dl_clean_parts)
+       if [ "$_ss_k" = 0 ]; then ui_notice "$L_PARTS_NONE"; else ui_notice "$L_PARTS_DONE $_ss_k"; fi
+       ;;
+-    9) screen_about ;;
++    9) calibrate_encoding ;;
++    10) screen_about ;;
+     *) return 0 ;;
+     esac
+   done
+@@ -372,6 +374,8 @@ app_main() {
+     log "config.json invalido: guardado como config.json.bad"
+   fi
+   load_settings
++  # primeira vez: descobrir como o selector desenha acentos (Latin-1 ou UTF-8); B pula e pergunta de novo na proxima
++  [ -n "$UI_ENC" ] || calibrate_encoding
+   if [ -z "$(cfg_get base_url)" ]; then
+     wizard || return 0
+   fi
+diff --git a/Apps/RomMLibrary/lib/screentext.awk b/Apps/RomMLibrary/lib/screentext.awk
+index fb24dd75..bf314533 100644
+--- a/Apps/RomMLibrary/lib/screentext.awk
++++ b/Apps/RomMLibrary/lib/screentext.awk
+@@ -1,23 +1,29 @@
+-# RomM Library - screentext.awk: prepara um texto UTF-8 para o infoscreen.
++# RomM Library - screentext.awk: prepara texto UTF-8 para os programas de tela do sistema.
+ #
+-# O infoscreen chama o sdl2imgshow, que desenha com TTF_RenderText_Solid: o texto e lido como
+-# Latin-1 (nao UTF-8) e as linhas nao quebram sozinhas.  Sem tratamento, "nao" com til vira "NÃ£o",
+-# titulos com aspas curvas ou macrons viram lixo e linhas longas saem da tela.
++# Os dois desenham com TTF_RenderText_Solid/Blended, que leem o texto como Latin-1 (nao UTF-8):
++#   - infoscreen (sdl2imgshow): desenha UMA linha so.  Quebra de linha vira o quadradinho "sem glifo" e o
++#     que passa da largura sai da tela.  Entao: tudo numa linha, cortado com "..." para caber.
++#   - selector (menus, titulos, avisos): aceita varias linhas no titulo, mas tambem le Latin-1.
+ #
+-# Entrada (stdin): texto UTF-8, uma linha de tela por linha.
+-# Saida: as mesmas linhas, quebradas na largura "px" (estimada para a fonte do tema no tamanho "fs"),
+-#        com tudo que nao e ASCII trocado por escapes "\0ooo" (octal, 1 byte Latin-1) ou por ASCII
+-#        (aspas curvas, reticencias, macrons...).  O shell converte os escapes com printf %b.
+-#        A barra invertida do texto original vira "\0134" para nao ser tomada como escape.
+-# Variaveis: -v fs=30 -v px=880 -v tbl=data/latin1.tsv
+-# Ao final o que sobrar com byte >= 0x80 (CJK etc.) e trocado por "?" pelo shell (tr).
++# Modos (-v mode=):
++#   conv  converte linha a linha, sem quebrar nem juntar  (itens e titulos do selector)
++#   line  junta todas as linhas em UMA ("a - b - c"), converte e corta com "..." na largura px; com
++#         -v tail=TEXTO anexa " - TEXTO" ao fim, que nunca e cortado  (infoscreen)
++#   wrap  NAO converte (continua UTF-8): so quebra as linhas por palavra na largura px  (avisos no selector)
++#
++# Conversao (conv e line): U+00A0..FF viram \0ooo (octal, 1 byte Latin-1; o shell converte com printf %b);
++#   pontuacao tipografica e letras latinas fora do Latin-1 viram ASCII (data/latin1.tsv); a barra
++#   invertida do texto vira \0134.  O que sobrar com byte >= 0x80 (CJK...) o shell troca por "?" (tr).
++# Variaveis: -v fs=30 -v px=880 -v tbl=data/latin1.tsv [-v tail=...]
+ # POSIX awk puro (mawk e BusyBox awk): so index/substr/length, nada de gsub com "\" na troca.
+ 
+ BEGIN {
+   if (fs + 0 <= 0) fs = 30
+   if (px + 0 <= 0) px = 880
++  if (mode == "") mode = "conv"
++  ns = 0
+   n = 0
+-  if (tbl != "") {
++  if (mode != "wrap" && tbl != "") {
+     while ((getline ln < tbl) > 0) {
+       if (ln == "" || substr(ln, 1, 1) == "#") continue
+       t = index(ln, "\t")
+@@ -43,7 +49,7 @@ function repl(s, a, b,    out, i, la) {
+ }
+ 
+ # largura estimada de uma celula, em fracao do corpo da fonte (valores medidos na fonte do tema,
+-# arredondados para cima: melhor quebrar um pouco cedo do que cortar a borda da tela)
++# arredondados para cima: melhor quebrar/cortar um pouco cedo do que sair da borda da tela)
+ function cw(c) {
+   if (c == " ") return 0.26
+   if (length(c) > 1) return 0.62
+@@ -54,7 +60,7 @@ function cw(c) {
+   return 0.60
+ }
+ 
+-function enc(s,    out, i, k, ch) {
++function enc(s,    out, i, k) {
+   # 1) barra invertida do original
+   out = ""
+   while ((i = index(s, "\\")) > 0) {
+@@ -71,40 +77,80 @@ function enc(s,    out, i, k, ch) {
+   return s
+ }
+ 
+-# quebra uma linha ja codificada: celulas = 1 caractere ASCII ou 1 escape "\0ooo" (5 caracteres)
+-function wrap(s,    i, L, c, m, w, lw, sp, k, out, first, start) {
+-  split("", cells)   # esvazia o vetor global (portavel entre mawk e BusyBox awk)
++# separa s em celulas (arr): 1 caractere ou, se tok, 1 escape "\0ooo" (5 caracteres). Devolve o numero.
++function cells_of(s, arr, tok,    i, L, c, m) {
++  split("", arr)
+   L = length(s)
+   m = 0
+   i = 1
+   while (i <= L) {
+     c = substr(s, i, 1)
+-    if (c == "\\" && substr(s, i + 1, 1) == "0") { c = substr(s, i, 5); i += 5 } else i++
+-    cells[++m] = c
++    if (tok && c == "\\" && substr(s, i + 1, 1) == "0") { c = substr(s, i, 5); i += 5 } else i++
++    arr[++m] = c
+   }
++  return m
++}
++
++function join(arr, a, b,    r, i) {
++  r = ""
++  for (i = a; i <= b; i++) r = r arr[i]
++  sub(/ +$/, "", r)     # sem espaco sobrando no fim da linha
++  return r
++}
++
++# largura estimada, em px, de um texto ja codificado
++function width(s,    m, i, w) {
++  m = cells_of(s, wc, 1)
++  w = 0
++  for (i = 1; i <= m; i++) w += cw(wc[i]) * fs
++  return w
++}
++
++# corta s (ja codificado) para caber em maxpx, terminando em "..." se precisou cortar
++function fit(s, maxpx,    m, i, w, ell, out) {
++  if (width(s) <= maxpx) return s
++  m = cells_of(s, fc, 1)
++  ell = 3 * cw(".") * fs
++  w = 0
++  out = ""
++  for (i = 1; i <= m; i++) {
++    w += cw(fc[i]) * fs
++    if (w + ell > maxpx) break
++    out = out fc[i]
++  }
++  sub(/ +$/, "", out)
++  return out "..."
++}
++
++# quebra uma linha por palavra na largura px.  No modo wrap (tok=0) o texto e UTF-8: uma palavra maior que a
++# linha NAO e partida (cortaria um caractere ao meio); ela so passa da largura.
++function wrap(s, tok,    m, k, start, lw, sp, w, c, out, first) {
++  m = cells_of(s, ca, tok)
+   out = ""
+   first = 1
+   lw = 0
+-  sp = 0      # posicao (em cells) do ultimo espaco da linha atual
+-  k = 1
++  sp = 0      # posicao (em celulas) do ultimo espaco da linha atual
+   start = 1
++  k = 1
+   while (k <= m) {
+-    c = cells[k]
++    c = ca[k]
+     w = cw(c) * fs
+     if (lw + w > px && k > start) {
+       if (sp > start) {
+-        # quebra no ultimo espaco
+-        out = out (first ? "" : "\n") join(start, sp - 1)
++        out = out (first ? "" : "\n") join(ca, start, sp - 1)
+         first = 0
+         start = sp + 1
+         k = start
+-      } else {
+-        # palavra maior que a linha: quebra dura
+-        out = out (first ? "" : "\n") join(start, k - 1)
+-        first = 0
+-        start = k
++        lw = 0
++        sp = 0
++        continue
+       }
+-      while (start <= m && cells[start] == " ") start++
++      # sem onde quebrar antes: deixa a palavra passar ate o proximo espaco
++      while (k <= m && ca[k] != " ") { lw += cw(ca[k]) * fs; k++ }
++      if (k > m) break
++      out = out (first ? "" : "\n") join(ca, start, k - 1)
++      first = 0
++      start = k + 1
+       k = start
+       lw = 0
+       sp = 0
+@@ -114,18 +160,32 @@ function wrap(s,    i, L, c, m, w, lw, sp, k, out, first, start) {
+     lw += w
+     k++
+   }
+-  out = out (first ? "" : "\n") join(start, m)
++  out = out (first ? "" : "\n") join(ca, start, m)
+   return out
+ }
+ 
+-function join(a, b,    r, i) {
+-  r = ""
+-  for (i = a; i <= b; i++) r = r cells[i]
+-  sub(/ +$/, "", r)     # sem espaco sobrando no fim da linha
+-  return r
+-}
+-
+ {
+   sub(/\r$/, "")
+-  print wrap(enc($0))
++  if (mode == "wrap") {
++    print wrap($0, 0)
++  } else if (mode == "line") {
++    if ($0 ~ /[^ \t]/) seg[++ns] = $0
++  } else {
++    print enc($0)
++  }
++}
++
++END {
++  if (mode == "line") {
++    main = ""
++    for (i = 1; i <= ns; i++) main = main (i > 1 ? " - " : "") seg[i]
++    main = enc(main)
++    te = enc(tail)
++    avail = px
++    if (te != "") avail = px - width(" - " te)
++    if (avail < 4 * fs) avail = 4 * fs
++    out = fit(main, avail)
++    if (te != "") out = (out != "" ? out " - " : "") te
++    print out
++  }
+ }
+diff --git a/README.md b/README.md
+index ff1000f1..86563828 100644
+--- a/README.md
++++ b/README.md
+@@ -31,7 +31,7 @@ Smart Pro · Smart Pro S · Brick · Brick Pro — auto-detected, auto-tuned.
+ | **Correções no JukaMix** | `Apps/SystemTools/…`, `System/usr/trimui/scripts/scraper/` | Tailscale/SFTPGo/Syncthing agora realmente param ao desativar (`pkill -x`); ícone do Neo Geo Pocket Color (`NGC`); ids do ScreenScraper para WonderSwan/WSC e Supervision; cancelar o restore em *FW Settings Save-Load* sai limpo |
+ | **Correção do travamento do RetroArch** | `trimui/app/trimui_inputd`, `System/resources/tsp_inputd`/`tsps_inputd`, `scripts/inputd-disable-ff.py` | O RetroArch travava no "loading" porque o daemon de entrada do TSP anuncia vibração (force feedback) mas nunca responde ao pedido do SDL. O patch troca 8 instruções para o controle virtual deixar de anunciar FF; o resto do daemon fica igual. Detalhes e limites: seção 8 do registro histórico |
+ | **Sonda do RetroArch** | `System/usr/trimui/scripts/ra_probe.sh`, `Apps/RetroArch/launch.sh` | Ao abrir Apps → RetroArch, anota em `System/logs/ra_probe.log` o que o processo está fazendo (estado, CPU por thread, arquivos abertos, E/S e, se travar em vibração, qual dispositivo e quem segura `/dev/uinput`). Não altera o comportamento do RetroArch |
+-| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (159 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
++| **Testes** | `tests/romm_library/`, `tests/jukamix_fixes_test.sh`, `tests/ra_probe_test.sh`, `tests/inputd_noff_test.sh`, `tests/repo_hygiene_test.sh` | `bash tests/romm_library/run.sh` (182 checagens, servidor RomM simulado), `bash tests/jukamix_fixes_test.sh` (35), `bash tests/ra_probe_test.sh` (44), `bash tests/inputd_noff_test.sh` (24, o `inputd_noff` usa `python3`) e `bash tests/repo_hygiene_test.sh` (8, nada de `Zone.Identifier` nem fontes repetidas nos temas). Precisam de `bash` |
+ | **Registro histórico** | [`docs/HISTORICO-2026-11-22.md`](docs/HISTORICO-2026-11-22.md), `releases/2026-11-22/` | O que foi feito e por quê, pendências, e os arquivos entregues (zips para o cartão, patches, bundle, `SHA256SUMS.txt`) |
+ 
+ **Instalar este fork no cartão:**
+diff --git a/docs/HISTORICO-2026-11-22.md b/docs/HISTORICO-2026-11-22.md
+index 3541eea8..08515fca 100644
+--- a/docs/HISTORICO-2026-11-22.md
++++ b/docs/HISTORICO-2026-11-22.md
+@@ -56,13 +56,14 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
+ 
+ | Arquivo | Para quê |
+ |---|---|
+-| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto (seção 10) e a opção Excluir (seção 11); a versão original tinha 26 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
++| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto (seções 10 e 12) e a opção Excluir (seção 11); a versão original tinha 26 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
+ | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
+ | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
+ | `RetroArch-probe-sdcard.zip` | **Substituído pelo `RetroArch-fix-sdcard.zip`.** Primeira versão da sonda (troca `Apps/RetroArch/launch.sh` e acrescenta `ra_probe.sh`). Guardado só para registro. |
+ | `RetroArch-fix-sdcard.zip` | Extrair na raiz do cartão (5 arquivos): daemon de entrada sem o anúncio de vibração (`trimui/app/trimui_inputd`, `System/resources/tsp_inputd` e `tsps_inputd`), sonda corrigida (`ra_probe.sh`) e `Apps/RetroArch/launch.sh`. Seção 8. |
+ | `romm-library-text.patch` | Patch git do commit da seção 10 (texto das telas de download e aviso), `git am` depois dos anteriores. |
+ | `romm-library-delete.patch` | Patch git do commit da seção 11 (opção "Excluir do cartão SD"), `git am` depois do anterior. |
++| `romm-library-ui.patch` | Patch git do commit da seção 12 (avisos e confirmações pelo `selector`, progresso em uma linha, calibração dos acentos), `git am` depois do anterior. |
+ | `jukamix-fixes.patch` | Patch git do commit `d0d8ff90` (`git am`, depois do anterior). |
+ | `retroarch-fix.patch` | Patch git (com `--binary`) do commit da correção do RetroArch (seção 8), `git am` depois dos anteriores. |
+ | `jukamix-romm-and-fixes.bundle` | Bundle git com todos os commits desde o JukaMix até a correção do RetroArch (`1741df2e`, ref `HEAD`; requer `d5102fab`). Não contém o commit que adiciona os arquivos de `releases/`. |
+@@ -268,6 +269,10 @@ por cima não as recria.
+ 
+ ## 10. RomM Library no aparelho: texto das telas de download e de aviso (2026-11-23/24)
+ 
++> **Superada em parte pela seção 12.** A conversão para Latin-1 (acentos) continua valendo, mas a ideia de
++> quebrar o texto em várias linhas no `infoscreen` estava errada: ele só desenha uma linha, e cada quebra
++> virava um quadradinho. Isso apareceu nas fotos do aparelho de 2026-11-24.
++
+ **Relato do usuário:** o app "rodou perfeitamente"; só as fontes na hora do download e nas mensagens de
+ aviso ficavam "bem bagunçadas". As fontes dos menus (mesmo pequenas) estavam ok.
+ 
+@@ -310,7 +315,7 @@ pelo menu do RomM.
+ **O que foi feito** (`lib/download.sh`, `lib/screens.sh`, `lib/i18n.sh`):
+ 
+ - Tela do jogo: quando ele está no cartão, o menu ganha "Excluir do cartão SD" (a numeração se ajusta;
+-  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (A: sim, B: não) mostrando até 3
++  sem o jogo no cartão o menu é o mesmo de antes). Pede confirmação (a partir da seção 12, um menu "Não" / "Sim, excluir"; antes era A/B no `infoscreen`) mostrando até 3
+   nomes, quantos itens a mais e o tamanho total, e avisa que saves e estados **não** são apagados.
+ - Para só apagar o que o app baixou, cada download passa a gravar `Data/romm/dl/<id>.lst` (linhas
+   `pasta<TAB>item`, item = arquivo ou pasta direto dentro de `Roms/<pasta>/`). Vale também para jogos
+@@ -331,3 +336,43 @@ na lista, saves e outro jogo na mesma pasta intactos).
+ 
+ **Limites:** testado só em simulação (`dash`, `mawk`, `du`/`sort` do ambiente de teste), não no
+ aparelho. Não apaga imagens/metadados que o scraper do JukaMix tenha gerado para o jogo.
++
++## 12. RomM Library: as letras ainda estavam ruins; avisos e progresso refeitos (2026-11-24)
++
++**Relato do usuário (3 fotos do aparelho):** "As letras seguem ruins." As fotos mostram a tela de progresso
++do download e os avisos com quadradinhos (⊠) em cada quebra de linha, frases longas numa linha só saindo
++pela borda e texto cortado. Os acentos já estavam certos.
++
++**Causa real:** o `infoscreen` (`sdl2imgshow`) faz **uma única** chamada `TTF_RenderText_Solid`. Ele só
++desenha uma linha: `\n` vira um quadradinho e nada quebra nem corta. A seção 10 supôs o contrário e
++acrescentou quebras de linha, que só pioraram. Quem desenha vários parágrafos é o `selector` (o título lê
++`\n`, uma linha por vez).
++
++**Correção** (`lib/common.sh`, `lib/screentext.awk`, `lib/download.sh`, `lib/platforms.sh`, `lib/screens.sh`,
++`lib/i18n.sh`):
++
++- **Progresso do download:** uma linha só no `infoscreen`: `título... - 45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar`.
++  O título é cortado com `...` na largura da tela (1150 px; 900 px no Brick) e o final (porcentagem, tamanho,
++  velocidade e dica) nunca é cortado. O rótulo "Baixando" saiu para sobrar espaço.
++- **Avisos** (`ui_notice`, `ui_wait`): viraram um menu do `selector` com um item "OK" e o texto no título,
++  quebrado por palavra em cerca de 57 caracteres (`screen_wrap`). A confirmação de exclusão (`ui_confirm`)
++  é um menu "Não" (item inicial) / "Sim, excluir".
++- **Frases curtas** ("Carregando...", "Conectando..."): `ui_info` continua no `infoscreen`, mas junta tudo
++  numa linha só.
++- **Seletor de pasta** (`plat_ask_folder`): itens numerados (`3. GBA`) e a pasta vem pelo número.
++- **Acentos no `selector`:** o binário sugere Latin-1 (`TTF_RenderText_*` não decodifica UTF-8), mas você
++  disse que os menus estavam ok mandando UTF-8, e eu não consigo testar no aparelho. Em vez de adivinhar,
++  na primeira abertura o app mostra duas linhas (`ação coração você`) em cada codificação e você escolhe
++  a que aparece certa; o resultado vai para `ui_encoding` no `config.json` (`latin1` ou `utf8`). **B** pula
++  e pergunta de novo na próxima vez. *Configurações → Acentos na tela* refaz a escolha. O texto devolvido
++  pelo `selector` é trocado de volta pelo original (UTF-8), então as comparações das telas não mudam.
++
++**Testes:** `tests/romm_library/run.sh` foi de 159 para 182 checagens: `screen_line` (uma linha, fim
++preservado, `...`, largura medida com Pillow na fonte do tema: ≤ 1280 px e, com 900 px, ≤ 1024 px),
++`screen_wrap` (UTF-8 intacto, ≤ 62 caracteres, palavras preservadas), conversão Latin-1, e a calibração
++(escolher UTF-8, escolher Latin-1, B, refazer pelas Configurações, bytes recebidos pelo `selector`
++conferidos). O mock do `selector` registra os bytes (`sel.raw`) e trata um menu de um item "OK" como aviso.
++
++**Limites:** nada disso foi rodado no aparelho: só `dash` e `mawk` aqui, não o `ash`/`awk` do BusyBox. A
++largura é uma estimativa conservadora com a fonte do tema (no Brick, 900 px é um palpite). Se alguma tela
++ainda sair torta, uma foto diz se é largura, fonte ou codificação.
+diff --git a/tests/romm_library/mocks/selector b/tests/romm_library/mocks/selector
+index a331a1ed..ea9272f7 100755
+--- a/tests/romm_library/mocks/selector
++++ b/tests/romm_library/mocks/selector
+@@ -1,5 +1,7 @@
+ #!/bin/sh
+ # mock do selector: escolhe segundo a fila $MOCK_DIR/sel.q  (contains:X | exact:X | idx:N | cancel)
++# Os textos chegam em Latin-1 (como no aparelho); os logs saem em UTF-8 para os testes poderem usar grep.
++# Um menu de UM item "OK" e' um aviso (ui_notice/ui_wait): vai para info.log e responde pela fila info.q (padrao A).
+ . "$(dirname "$0")/mocklib.sh"
+ D=$MOCK_DIR
+ title=""
+@@ -11,16 +13,35 @@ while [ $# -gt 0 ]; do
+   *) shift ;;
+   esac
+ done
+-{ printf '=== %s\n' "$title"; for it in "$@"; do printf '  | %s\n' "$it"; done; } >>"$D/sel.log"
++u8() { # texto -> UTF-8 (se ja for UTF-8 valido, fica como esta; senao le como Latin-1)
++  if printf '%s' "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then printf '%s' "$1"
++  else printf '%s' "$1" | iconv -f ISO-8859-1 -t UTF-8; fi
++}
++tu=$(u8 "$title")
++{ printf '=== %s\n' "$title"; for it in "$@"; do printf '  | %s\n' "$it"; done; } >>"$D/sel.raw"
++if [ $# -eq 1 ] && [ "$(u8 "$1")" = OK ]; then
++  # aviso: o titulo traz "\n" literal; no log vira quebra de linha real (como o selector desenha)
++  printf '%s\n----\n' "$title" | sed 's/\\n/\n/g' >>"$D/info.raw"
++  printf '%s\n----\n' "$tu" | sed 's/\\n/\n/g' >>"$D/info.log"
++  act=$(pop "$D/info.q")
++  case "$act" in key:B) exit 0 ;; *) printf 'You selected: %s\n' "$1" ;; esac
++  exit 0
++fi
++{ printf '=== %s\n' "$tu"; for it in "$@"; do printf '  | %s\n' "$(u8 "$it")"; done; } >>"$D/sel.log"
+ act=$(pop "$D/sel.q")
+ chosen=""
+-case "$act" in
+-contains:*) want=${act#contains:}; for it in "$@"; do case "$it" in *"$want"*) chosen=$it; break ;; esac; done ;;
+-exact:*) want=${act#exact:}; for it in "$@"; do [ "$it" = "$want" ] && { chosen=$it; break; }; done ;;
+-idx:*) n=${act#idx:}; i=0; for it in "$@"; do i=$((i + 1)); [ "$i" = "$n" ] && chosen=$it; done ;;
+-cancel | "") : ;;
+-esac
+-case "$act" in cancel | "") ;; *) [ -n "$chosen" ] || echo "SELECTOR sem item para '$act' em '$title'" >>"$D/errors.log" ;; esac
+-printf 'ACT %s -> %s\n' "${act:-<fila vazia>}" "${chosen:-<cancelou>}" >>"$D/sel.log"
++want=${act#*:}
++i=0
++for it in "$@"; do
++  i=$((i + 1))
++  iu=$(u8 "$it")
++  case "$act" in
++  contains:*) case "$iu" in *"$want"*) chosen=$it; chosen_u=$iu; break ;; esac ;;
++  exact:*) [ "$iu" = "$want" ] && { chosen=$it; chosen_u=$iu; break; } ;;
++  idx:*) [ "$i" = "$want" ] && { chosen=$it; chosen_u=$iu; break; } ;;
++  esac
++done
++case "$act" in cancel | "") ;; *) [ -n "$chosen" ] || echo "SELECTOR sem item para '$act' em '$tu'" >>"$D/errors.log" ;; esac
++printf 'ACT %s -> %s\n' "${act:-<fila vazia>}" "${chosen_u:-<cancelou>}" >>"$D/sel.log"
+ [ -n "$chosen" ] && printf 'You selected: %s\n' "$chosen"
+ exit 0
+diff --git a/tests/romm_library/run.sh b/tests/romm_library/run.sh
+index 02d233da..7e182488 100755
+--- a/tests/romm_library/run.sh
++++ b/tests/romm_library/run.sh
+@@ -47,10 +47,12 @@ new_sd() {
+   : >"$M/sel.q"; : >"$M/vk.q"; : >"$M/info.q"; : >"$M/prog.q"
+   APPLOG=$SD/System/logs/romm_library.log
+   CFGF=$SD/Data/romm/config.json
++  # config ja "calibrada" (acentos em Latin-1), para as telas nao pararem na pergunta de calibracao
++  mkdir -p "$SD/Data/romm"; printf '{"ui_encoding":"latin1"}\n' >"$CFGF"
+ }
+ q() { local f=$M/$1.q; shift; printf '%s\n' "$@" >>"$f"; }
+ write_cfg() { mkdir -p "$SD/Data/romm"; printf '%s\n' "$1" >"$SD/Data/romm/config.json"; }
+-cfg_token() { write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"; }
++cfg_token() { write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"; }
+ run_app() {
+   env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY NO_PROXY='*' ROMM_CONNECT_TIMEOUT=2 \
+     ROMM_SDCARD="$SD" MOCK_DIR="$M" ${MOCK_FREE_KB:+MOCK_FREE_KB=$MOCK_FREE_KB} \
+@@ -69,7 +71,7 @@ sha_file() { sha256sum "$1" | cut -d' ' -f1; }
+ dump() {
+   echo "    ---- diagnostico ----"
+   for f in "$M/sel.log" "$M/info.log" "$M/vk.log" "$M/errors.log" "$APPLOG" "${REQLOG:-/dev/null}" "$M/out.txt"; do
+-    [ -s "$f" ] && { echo "    >> $(basename "$f")"; tail -n 25 "$f" | sed 's/^/       /'; }
++    [ -s "$f" ] && { echo "    >> $(basename "$f")"; tail -n "${DUMPN:-25}" "$f" | sed 's/^/       /'; }
+   done
+ }
+ scenario() { # nome -> 0 se deve rodar
+@@ -108,35 +110,67 @@ if scenario "unit"; then
+   eq "sanitize: so pontos" "$(SH 'dl_sanitize "..."')" "rom"
+   eq "sanitize: barra invertida" "$(SH 'dl_sanitize "a\\b|c*d"')" "a_b_c_d"
+ 
+-  # ---- texto do infoscreen: sdl2imgshow le Latin-1 (TTF_RenderText_Solid) e nao quebra linhas
++  # ---- texto na tela: infoscreen e selector leem Latin-1 (nao UTF-8); o infoscreen so desenha UMA linha
+   hex_of() { od -An -v -tx1 | tr -d ' \n'; }
+-  eq "screen_text: acentos viram 1 byte Latin-1" "$(SH 'screen_text "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
+-  eq "screen_text: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'screen_text "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
+-  eq "screen_text: macron vira a letra base" "$(SH 'screen_text "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
+-  eq "screen_text: CJK vira um unico ?" "$(SH 'screen_text "ドラゴンクエスト"')" "?"
+-  eq "screen_text: barra invertida e % ficam como estao" "$(SH 'screen_text "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
+-  eq "screen_text: texto ASCII curto nao muda" "$(SH 'screen_text "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s" 28')" "Downloading 45%   12.3 MB / 40.0 MB  -  1.2 MB/s"
+-  eq "screen_text: linha em branco e quebra real preservadas" "$(SH 'screen_text "Baixando
++  eq "to_latin1: acentos viram 1 byte Latin-1" "$(SH 'to_latin1 "Não é possível ç Ç õ ü"' | hex_of)" "$(printf 'N\343o \351 poss\355vel \347 \307 \365 \374' | hex_of)"
++  eq "to_latin1: aspas curvas, travessao e reticencias viram ASCII" "$(SH 'to_latin1 "“A” – ‘B’ — C…"')" "\"A\" - 'B' - C..."
++  eq "to_latin1: macron vira a letra base" "$(SH 'to_latin1 "Ōkami Šibenik Łódź"')" "Okami Sibenik L$(printf '\363')d""z"
++  eq "to_latin1: CJK vira um unico ?" "$(SH 'to_latin1 "ドラゴンクエスト"')" "?"
++  eq "to_latin1: barra invertida e % ficam como estao" "$(SH 'to_latin1 "C:\\dir\\0343 100%s %d"')" 'C:\dir\0343 100%s %d'
++  eq "to_latin1: linha em branco e quebra real preservadas" "$(SH 'to_latin1 "Baixando
+ 
+ Jogo"')" "$(printf 'Baixando\n\nJogo')"
+-  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
+-  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "$_long")
+-  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_text: linha longa e quebrada em varias" || bad "screen_text: linha longa nao quebrou"
+-  eq "screen_text: quebrar nao perde nem troca palavras" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | iconv -f UTF-8 -t ISO-8859-1 | hex_of)"
+-  _lw=$(printf '%s\n' "$_wr" | awk '{ if (length($0) > m) m = length($0) } END { print m }')
+-  [ "$_lw" -le 60 ] && ok "screen_text: nenhuma linha passa de 60 caracteres ($_lw)" || bad "screen_text: linha com $_lw caracteres"
+-  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_text "$1" 30' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
+-  [ "$(printf '%s\n' "$_wr2" | wc -l)" -ge 2 ] && ok "screen_text: palavra maior que a tela sofre quebra dura" || bad "screen_text: palavra gigante nao quebrou"
++  eq "ui_text: ui_encoding=utf8 nao converte nada" "$(SH 'UI_ENC=utf8; ui_text "Não é"' | hex_of)" "$(printf 'Não é' | hex_of)"
++
++  eq "screen_line: ASCII curto + fim" "$(SH 'screen_line "Zelda" 26 "45%  -  B: parar"')" "Zelda - 45%  -  B: parar"
++  eq "screen_line: acento em 1 byte Latin-1" "$(SH 'screen_line "Pokémon" 26' | hex_of)" "$(printf 'Pok\351mon' | hex_of)"
++  eq "screen_line: varias linhas viram UMA (sem quebra de linha)" "$(SH 'screen_line "Um
++Dois
++
++Tres" 26' | wc -l | tr -d ' ')" "0"
++  _lt="THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST EDITION WITH A VERY LONG NAME INDEED"
++  _lo=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_line "$1" 26 "45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar"' sh "$_lt")
++  check "screen_line: titulo longo e cortado com ..." sh -c "printf '%s' '$_lo' | grep -q '\.\.\. - 45%'"
++  check "screen_line: o fim (progresso e dica) nunca e cortado" sh -c "printf '%s' '$_lo' | grep -q '45%   12.3 MB / 40.0 MB  -  1.2 MB/s  -  B: parar\$'"
++  eq "screen_line: uma linha so" "$(printf '%s' "$_lo" | wc -l | tr -d ' ')" "0"
+   # largura real na fonte do tema (so com Pillow)
+   if python3 -c 'import PIL' 2>/dev/null; then
+-    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "O servidor não tem plataformas com jogos (ou seu usuário não pode vê-las). Confira o login." "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do screen_text "$t" 30; printf "\036"; done')
++    _ww=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "Zelda" "$1" "Dragon Ball Z - Budokai Tenkaichi 3 (Europe) (En,Fr,De,Es,It) (Rev 1)" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW" "Pokémon: Edição Ç ã õ ü"; do screen_line "$t" 26 "100%   123.4 MB / 999.9 MB  -  12.3 MB/s  -  B: parar"; printf "\036"; done' sh "$_lt")
+     _mx=$(printf '%s' "$_ww" | python3 -I -c '
+ import sys
+ from PIL import ImageFont
+-f = ImageFont.truetype(sys.argv[1], 30)
++f = ImageFont.truetype(sys.argv[1], 26)
++raw = sys.stdin.buffer.read().decode("latin-1")
++print(int(max(f.getlength(l) for l in raw.split("\x1e") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
++    [ "$_mx" -le 1280 ] && ok "screen_line: maior linha mede $_mx px na fonte do tema (tela do TSP: 1280)" || bad "screen_line: linha de $_mx px passa da tela"
++    _mb=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; SCREEN_PX=900; screen_line "$1" 26 "100%   123.4 MB / 999.9 MB  -  12.3 MB/s  -  B: parar"' sh "$_lt" | python3 -I -c '
++import sys
++from PIL import ImageFont
++f = ImageFont.truetype(sys.argv[1], 26)
++print(int(f.getlength(sys.stdin.buffer.read().decode("latin-1"))))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
++    [ "$_mb" -le 1024 ] && ok "screen_line: com SCREEN_PX=900 (Brick) mede $_mb px (tela: 1024)" || bad "screen_line: no Brick mede $_mb px"
++  fi
++
++  eq "screen_wrap: texto curto fica como esta (UTF-8)" "$(SH 'screen_wrap "Não é possível"' | hex_of)" "$(printf 'Não é possível' | hex_of)"
++  eq "screen_wrap: linha em branco preservada" "$(SH 'screen_wrap "Um
++
++Dois"')" "$(printf 'Um\n\nDois')"
++  _long='O servidor não tem plataformas com jogos (ou o seu usuário não pode vê-las). Confira o login e as permissões no RomM e tente de novo.'
++  _wr=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_wrap "$1"' sh "$_long")
++  [ "$(printf '%s\n' "$_wr" | wc -l)" -ge 2 ] && ok "screen_wrap: linha longa e quebrada em varias" || bad "screen_wrap: linha longa nao quebrou"
++  eq "screen_wrap: quebrar nao perde nem troca palavras (UTF-8 intacto)" "$(printf '%s' "$_wr" | tr '\n' ' ' | sed 's/ *$//' | hex_of)" "$(printf '%s' "$_long" | hex_of)"
++  _lw=$(printf '%s\n' "$_wr" | python3 -I -c 'import sys; print(max(len(l.rstrip("\n")) for l in sys.stdin.buffer.read().decode("utf-8").splitlines()))')
++  [ "$_lw" -le 62 ] && ok "screen_wrap: nenhuma linha passa de 62 caracteres ($_lw)" || bad "screen_wrap: linha com $_lw caracteres"
++  _wr2=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; screen_wrap "$1"' sh "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ")
++  eq "screen_wrap: palavra gigante nao e partida (so passa da margem)" "$_wr2" "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ"
++  if python3 -c 'import PIL' 2>/dev/null; then
++    _wm=$(ROMM_SDCARD=$SD APP_DIR=$SD/Apps/RomMLibrary dash -c '. "$APP_DIR/lib/i18n.sh"; . "$APP_DIR/lib/common.sh"; for t in "$1" "THE LEGEND OF ZELDA: THE WIND WAKER (USA) (DISC 1) [!] MASTER QUEST" "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; do to_latin1 "$(screen_wrap "$t")"; printf "\036"; done' sh "$_long" | python3 -I -c '
++import sys
++from PIL import ImageFont
++f = ImageFont.truetype(sys.argv[1], 24)
+ raw = sys.stdin.buffer.read().decode("latin-1")
+ print(int(max(f.getlength(l) for blk in raw.split("\x1e") for l in blk.split("\n") if l)))' "$ROOT/Themes/JukCrossMix-OS/wqy-microhei.ttf")
+-    [ "$_mx" -le 1000 ] && ok "screen_text: maior linha mede $_mx px na fonte do tema (tela do Brick: 1024)" || bad "screen_text: linha de $_mx px passa da tela"
++    [ "$_wm" -le 1100 ] && ok "screen_wrap: maior linha mede $_wm px a 24 pt (cabe na tela do TSP, 1280)" || bad "screen_wrap: linha de $_wm px"
+   fi
+ 
+   eq "urlenc UTF-8 + simbolos" "$(SH 'urlenc "Pokémon: Emerald & Co. (USA).gba"')" "Pok%C3%A9mon%3A%20Emerald%20%26%20Co.%20%28USA%29.gba"
+@@ -245,7 +279,7 @@ fi
+ 
+ if scenario "e2e-server-down"; then
+   start_server; new_sd
+-  write_cfg '{"base_url":"http://127.0.0.1:9","token":"x"}'
++  write_cfg '{"ui_encoding":"latin1","base_url":"http://127.0.0.1:9","token":"x"}'
+   q sel "contains:Sair"
+   run_app
+   eq "app terminou sem erro" "$RC" "0"
+@@ -257,7 +291,7 @@ fi
+ if scenario "e2e-tailscale-hint"; then
+   start_server; new_sd
+   printf '#!/bin/sh\n[ "$1" = status ] && { echo "{\\"BackendState\\":\\"Stopped\\"}"; exit 0; }\nexit 1\n' >"$SD/System/bin/tailscale"; chmod +x "$SD/System/bin/tailscale"
+-  write_cfg '{"base_url":"http://100.101.2.3:9","token":"x"}'
++  write_cfg '{"ui_encoding":"latin1","base_url":"http://100.101.2.3:9","token":"x"}'
+   q sel "contains:Sair"
+   run_app
+   check "dica do Tailscale parado aparece" grep -q "Tailscale não está conectado" "$M/sel.log"
+@@ -274,7 +308,7 @@ ip) echo 127.0.0.1 ;;
+ esac
+ EOF
+   chmod +x "$SD/System/bin/tailscale"
+-  write_cfg "{\"base_url\":\"http://nas-teste.ts.net:$PORT\",\"token\":\"$TOKEN\"}"
++  write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://nas-teste.ts.net:$PORT\",\"token\":\"$TOKEN\"}"
+   q sel "contains:Explorar"
+   run_app
+   check "nome MagicDNS resolvido pelo Tailscale e platformas carregadas" grep -q "Game Boy Advance" "$M/sel.log"
+@@ -360,14 +394,15 @@ if scenario "e2e-delete-single"; then
+   start_server; new_sd; cfg_token
+   mkdir -p "$SD/Saves/GBA"; printf s >"$SD/Saves/GBA/keep.sav"
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
+-    "contains:Advançe" "contains:Excluir"
++    "contains:Advançe" "contains:Excluir" "contains:Sim, excluir"
+   run_app
+   f="$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+   check "jogo foi baixado e excluido" test ! -e "$f"
+   check "lista de arquivos foi removida" sh -c "! ls '$SD/Data/romm/dl' 2>/dev/null | grep -q lst"
+   check "saves intactos" test -f "$SD/Saves/GBA/keep.sav"
+   eq "Excluir so aparece com o jogo no cartao (1 menu de 3)" "$(grep -c '^  | .*Excluir do cartão SD' "$M/sel.log")" "1"
+-  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/info.log"
++  check "pediu confirmacao e avisou dos saves" grep -q "NÃO são apagados" "$M/sel.log"
++  check "confirmacao tem 'Não' (item inicial) e 'Sim, excluir'" grep -Eq '^  \| 2\. Sim, excluir' "$M/sel.log"
+   check "mostrou o resultado" grep -q "Excluído do cartão SD" "$M/info.log"
+   check "log registra o que apagou" grep -q "excluir id=.*apagado Roms/GBA/Adv" "$APPLOG"
+   end_scenario
+@@ -376,8 +411,7 @@ fi
+ if scenario "e2e-delete-cancel"; then
+   start_server; new_sd; cfg_token
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Baixar para" \
+-    "contains:Advançe" "contains:Excluir"
+-  q info "key:A" "key:B"      # 1o: aviso do fim do download; 2o: confirmacao -> B (nao)
++    "contains:Advançe" "contains:Excluir" "contains:Não"
+   run_app
+   check "B na confirmacao nao apaga nada" test -f "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+   check "lista de arquivos continua" test -f "$SD/Data/romm/dl/1.lst"
+@@ -388,7 +422,7 @@ if scenario "e2e-delete-multifile"; then
+   start_server; new_sd; cfg_token
+   printf x >"$SD/Roms/PS/Outro Jogo.cue"
+   q sel "contains:Explorar" "contains:PlayStation" "contains:Crash" "contains:Baixar para" \
+-    "contains:Crash" "contains:Excluir"
++    "contains:Crash" "contains:Excluir" "contains:Sim, excluir"
+   run_app
+   check "arquivos do jogo multi-arquivo apagados" sh -c "[ ! -e '$SD/Roms/PS/Crash Test (PS1).cue' ] && [ ! -e '$SD/Roms/PS/Crash Test (PS1).bin' ]"
+   check "outro jogo na mesma pasta intacto" test -f "$SD/Roms/PS/Outro Jogo.cue"
+@@ -409,7 +443,7 @@ fi
+ if scenario "e2e-delete-legacy"; then
+   start_server; new_sd; cfg_token
+   printf x >"$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"   # baixado por uma versao sem lista
+-  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir"
++  q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Advançe" "contains:Excluir" "contains:Sim, excluir"
+   run_app
+   check "arquivo unico antigo excluido pelo menu" test ! -e "$SD/Roms/GBA/Advançe_ Emerald & Co. (USA).gba"
+   end_scenario
+@@ -443,7 +477,8 @@ if scenario "e2e-cancel-and-resume"; then
+   q sel "contains:Explorar" "contains:Game Boy Advance" "contains:Big Flaky" "contains:Baixar para" "contains:Baixar para"
+   run_app
+   check "parada pelo B explicada" grep -q "Download parado" "$M/info.log"
+-  check "progresso foi exibido" grep -Eq "Baixando" "$M/info.log"
++  check "progresso foi exibido em UMA linha (porcentagem + dica)" grep -Eq "^.*[0-9]+% .*B: parar$" "$M/info.log"
++  check "nenhuma tela do infoscreen tem varias linhas" bash -c "! grep -B1 '^----\$' '$M/info.log' | grep -q '^\$'"
+   check "retomou depois (Range)" grep -Eq "range-from=[1-9][0-9]*" "$REQLOG"
+   eq "arquivo final identico" "$(sha_file "$SD/Roms/GBA/Big Flaky Adventure.gba" 2>/dev/null)" "$(sha_of 3)"
+   end_scenario
+@@ -451,7 +486,7 @@ fi
+ 
+ if scenario "e2e-unmapped-asks-and-remembers"; then
+   start_server; new_sd; cfg_token
+-  q sel "contains:Explorar" "contains:Arcade" "contains:Metal" "contains:Baixar para" "exact:FBNEO" "contains:Zed" "contains:Baixar para"
++  q sel "contains:Explorar" "contains:Arcade" "contains:Metal" "contains:Baixar para" "contains:FBNEO" "contains:Zed" "contains:Baixar para"
+   run_app
+   eq "ZIP de arcade fica intacto (nao e' extraido)" "$(sha_file "$SD/Roms/FBNEO/mslug.zip" 2>/dev/null)" "$(sha_of 80)"
+   check "segundo jogo foi para a pasta lembrada" test -f "$SD/Roms/FBNEO/zedfight.zip"
+@@ -472,7 +507,7 @@ fi
+ 
+ if scenario "e2e-search-global"; then
+   start_server; new_sd
+-  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\",\"platform_map\":{\"arcade\":\"FBNEO\"}}"
++  write_cfg "{\"ui_encoding\":\"latin1\",\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\",\"platform_map\":{\"arcade\":\"FBNEO\"}}"
+   q vk "text:metal"
+   q sel "contains:Buscar jogo" "contains:Metal"
+   run_app
+@@ -510,13 +545,53 @@ if scenario "e2e-settings"; then
+   end_scenario
+ fi
+ 
++if scenario "e2e-encoding-calibration"; then
++  # escolher a linha UTF-8: o app passa a mandar UTF-8 ao selector
++  start_server; new_sd
++  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
++  q sel "contains:2. a" "contains:Explorar" "contains:Game Boy Advance" "cancel" "cancel" "cancel"
++  run_app
++  eq "escolheu a linha UTF-8 -> salvo utf8" "$(jq -r .ui_encoding "$CFGF")" "utf8"
++  check "calibracao mostrou as duas linhas (Latin-1 e UTF-8)" sh -c "LC_ALL=C grep -q 'a$(printf '\347\343')o cora' '$M/sel.raw' && LC_ALL=C grep -q 'a$(printf '\303\247\303\243')o cora' '$M/sel.raw'"
++  check "depois o titulo dos menus chegou em UTF-8" sh -c "LC_ALL=C grep -q 'Configura$(printf '\303\247\303\265')es' '$M/sel.raw'"
++  check "e nenhum byte Latin-1 de 'Configurações' chegou" sh -c "! LC_ALL=C grep -q 'Configura$(printf '\347\365')es' '$M/sel.raw'"
++  end_scenario
++
++  # escolher a linha Latin-1: menus seguem em Latin-1 (1 byte por acento)
++  start_server; new_sd
++  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
++  q sel "contains:1. a" "cancel"
++  run_app
++  eq "escolheu a linha Latin-1 -> salvo latin1" "$(jq -r .ui_encoding "$CFGF")" "latin1"
++  check "menu principal em Latin-1" sh -c "LC_ALL=C grep -q 'Configura$(printf '\347\365')es' '$M/sel.raw'"
++  end_scenario
++
++  # B na calibracao: nada e' salvo (pergunta de novo na proxima) e o app segue em Latin-1
++  start_server; new_sd
++  write_cfg "{\"base_url\":\"http://127.0.0.1:$PORT\",\"token\":\"$TOKEN\"}"
++  q sel "cancel" "cancel"
++  run_app
++  eq "B na calibracao nao salva nada" "$(jq -r '.ui_encoding // "nada"' "$CFGF")" "nada"
++  check "o app seguiu para o menu principal" grep -q "Explorar plataformas" "$M/sel.log"
++  end_scenario
++
++  # refazer pelas Configuracoes
++  start_server; new_sd; cfg_token
++  q sel "contains:Configurações" "contains:Acentos na tela" "contains:2. a" "cancel" "cancel"
++  run_app
++  eq "Configuracoes > Acentos na tela: virou utf8" "$(jq -r .ui_encoding "$CFGF")" "utf8"
++  check "item de Configuracoes mostra o valor atual (Latin-1)" grep -q "Acentos na tela: Latin-1" "$M/sel.log"
++  end_scenario
++fi
++
+ if scenario "e2e-bad-config-recovers"; then
+   start_server; new_sd
+   mkdir -p "$SD/Data/romm"; printf '{quebrado' >"$CFGF"
+   q vk "text:127.0.0.1:$PORT" "text:$TOKEN"
+-  q sel "contains:Token"
++  q sel "contains:1. a" "contains:Token"   # 1a pergunta: calibracao dos acentos (config nova, sem ui_encoding)
+   run_app
+   check "config quebrada foi guardada como .bad" test -f "$CFGF.bad"
++  eq "calibracao salva ui_encoding" "$(jq -r .ui_encoding "$CFGF")" "latin1"
+   check "assistente rodou e conectou" grep -q "Conectado!" "$M/info.log"
+   end_scenario
+ fi
+-- 
+2.43.0
+

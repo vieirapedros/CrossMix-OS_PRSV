@@ -56,7 +56,7 @@ Branch das duas anteriores + este documento + os arquivos entregues em `releases
 
 | Arquivo | Para quê |
 |---|---|
-| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (29 arquivos). **Regerado em 2026-11-24** com a correção de texto (seções 10 e 12) e a opção Excluir (seção 11); a versão original tinha 26 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
+| `RomMLibrary-sdcard.zip` | Extrair na raiz do cartão: cria `Apps/RomMLibrary/` (24 arquivos). **Regerado em 2026-11-24** com a correção de texto (seções 10 e 12) e a opção Excluir (seção 11); a versão original tinha 22 arquivos; por cima de uma instalação existente só troca os arquivos do app e não mexe em `Data/romm/`. |
 | `JukaMix-fixes-sdcard.zip` | Extrair na raiz do cartão: substitui os 10 arquivos corrigidos. |
 | `romm-library.patch` | Patch git do commit `272c5cff` (`git am`). |
 | `RetroArch-probe-sdcard.zip` | **Substituído pelo `RetroArch-fix-sdcard.zip`.** Primeira versão da sonda (troca `Apps/RetroArch/launch.sh` e acrescenta `ra_probe.sh`). Guardado só para registro. |
